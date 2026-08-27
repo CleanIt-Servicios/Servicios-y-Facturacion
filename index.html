@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Clean it — Gestión</title>
+<style>
+:root{
+  --bg:#F0F3F8;--surface:#fff;--surface2:#F7F9FC;--border:#DDE2EA;--border2:#c8cfd8;
+  --text:#1a1e2e;--text2:#5a6272;--text3:#8892a0;
+  --primary:#1877F2;--primary-dark:#1260CC;--primary-bg:#EBF3FF;
+  --green-bg:#eaf3de;--green-txt:#2d5a0e;
+  --amber-bg:#faeeda;--amber-txt:#7a4a08;
+  --red-bg:#fcebeb;--red-txt:#7a1f1f;
+  --blue-bg:#EBF3FF;--blue-txt:#1877F2;
+  --purple-bg:#eeedfe;--purple-txt:#3c3489;
+  --gray-bg:#f1efe8;--gray-txt:#5f5e5a;
+  --sidebar:210px;--radius:8px;--radius-lg:12px;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.5}
+button{font-family:inherit;cursor:pointer}
+input,select{font-family:inherit}
+
+/* SIDEBAR */
+.sidebar{width:var(--sidebar);background:#1877F2;color:rgba(255,255,255,0.85);display:flex;flex-direction:column;position:fixed;top:0;left:0;height:100vh;z-index:200;transition:transform 0.25s ease}
+.sidebar-logo{padding:16px 14px 14px;border-bottom:1px solid rgba(255,255,255,0.15);display:flex;align-items:center;gap:10px}
+.sidebar-logo h1{font-size:17px;font-weight:500;color:#fff;letter-spacing:0.2px}
+.sidebar-logo span{font-size:10px;color:rgba(255,255,255,0.45);display:block;margin-top:1px}
+.nav{flex:1;padding:8px 6px;overflow-y:auto}
+.nav-section{padding:12px 10px 3px;font-size:10px;letter-spacing:0.8px;color:rgba(255,255,255,0.45);text-transform:uppercase;font-weight:500}
+.nav-item{display:flex;align-items:center;gap:9px;padding:9px 12px;font-size:12px;color:rgba(255,255,255,0.72);cursor:pointer;border-radius:7px;margin:1px 0;transition:all 0.12s;user-select:none}
+.nav-item:hover{color:#fff;background:rgba(255,255,255,0.12)}
+.nav-item.active{color:#fff;background:rgba(255,255,255,0.18);font-weight:500}
+.nav-item svg{width:16px;height:16px;flex-shrink:0;opacity:0.8}
+.nav-item.active svg{opacity:1}
+
+/* MAIN */
+.main{margin-left:var(--sidebar);flex:1;display:flex;flex-direction:column;min-height:100vh}
+.topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50;gap:8px;box-shadow:0 1px 3px rgba(0,0,0,0.04)}
+.topbar h2{font-size:15px;font-weight:500;color:var(--text)}
+.topbar-meta{font-size:11px;color:var(--text3);background:var(--bg);padding:3px 8px;border-radius:4px;border:1px solid var(--border);white-space:nowrap}
+.content{padding:24px;flex:1}
+
+/* CARDS */
+.card{background:var(--surface);border:0.5px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;margin-bottom:14px;box-shadow:0 1px 3px rgba(0,0,0,0.04)}
+.card-header{padding:13px 18px;border-bottom:0.5px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px}
+.card-header h3{font-size:13px;font-weight:500;color:var(--text)}
+
+/* BOTONES */
+.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border:1px solid var(--border2);border-radius:var(--radius);background:var(--surface);color:var(--text);font-size:13px;transition:all 0.12s}
+.btn:hover{background:var(--surface2)}
+.btn-primary{background:var(--primary);color:#fff;border-color:var(--primary)}
+.btn-primary:hover{background:var(--primary-dark)}
+.btn-sm{padding:4px 10px;font-size:12px}
+
+/* PLACEHOLDER */
+.placeholder{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 20px;text-align:center;color:var(--text3)}
+.placeholder svg{width:48px;height:48px;opacity:0.3;margin-bottom:16px}
+.placeholder h3{font-size:16px;font-weight:500;color:var(--text2);margin-bottom:6px}
+.placeholder p{font-size:13px;max-width:400px}
+
+/* EMPTY STATE */
+.empty-tag{display:inline-block;background:var(--amber-bg);color:var(--amber-txt);font-size:11px;padding:3px 10px;border-radius:20px;margin-top:12px}
+
+/* LOADING */
+.loading-bar{position:fixed;top:0;left:0;right:0;background:var(--primary);color:#fff;text-align:center;padding:8px;font-size:13px;z-index:1000;display:none}
+
+/* LOGIN */
+.login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--bg)}
+.login-box{background:var(--surface);border-radius:var(--radius-lg);padding:40px;max-width:380px;width:90%;box-shadow:0 4px 24px rgba(0,0,0,0.08);border:0.5px solid var(--border)}
+.login-logo{text-align:center;margin-bottom:32px}
+.login-field{margin-bottom:16px}
+.login-field label{font-size:11px;font-weight:600;color:var(--text2);display:block;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px}
+.login-field input,.login-field select{width:100%;padding:10px 14px;border:1px solid var(--border2);border-radius:var(--radius);font-size:14px;background:var(--surface);color:var(--text);outline:none}
+.login-field input:focus,.login-field select:focus{border-color:var(--primary)}
+.login-error{display:none;color:var(--red-txt);font-size:12px;margin-bottom:12px;padding:8px 12px;background:var(--red-bg);border-radius:var(--radius)}
+
+/* SIDEBAR FOOTER */
+.sidebar-footer{padding:10px 14px;border-top:1px solid rgba(255,255,255,0.12);flex-shrink:0}
+.sidebar-footer .perfil{font-size:10px;color:rgba(255,255,255,0.45);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px}
+.sidebar-footer button{width:100%;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);color:rgba(255,255,255,0.75);border-radius:6px;padding:6px 10px;font-size:11px;text-align:center}
+
+/* MODAL */
+.modal-overlay{display:none;position:fixed;inset:0;z-index:1000;align-items:center;justify-content:center}
+.modal-backdrop{position:absolute;inset:0;background:rgba(0,0,0,0.45)}
+.modal-box{position:relative;background:var(--surface);border-radius:var(--radius-lg);padding:24px;max-width:420px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.2);z-index:1}
+.modal-title{font-size:15px;font-weight:600;margin-bottom:18px;color:var(--text)}
+.modal-field{margin-bottom:14px}
+.modal-field label{font-size:11px;font-weight:600;color:var(--text2);display:block;margin-bottom:5px;text-transform:uppercase;letter-spacing:0.5px}
+.modal-field input,.modal-field select{width:100%;padding:9px 12px;border:1px solid var(--border2);border-radius:var(--radius);font-size:13px;background:var(--surface);color:var(--text)}
+.modal-field input:focus,.modal-field select:focus{outline:none;border-color:var(--primary)}
+.modal-hint{font-size:11px;color:var(--text3);background:var(--surface2);border-radius:var(--radius);padding:8px 12px;margin-bottom:14px}
+.modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:20px}
+.tag{display:inline-block}
+
+@media(max-width:768px){
+  .sidebar{transform:translateX(-100%)}
+  .sidebar.open{transform:translateX(0)}
+  .main{margin-left:0}
+}
+</style>
+</head>
+<body>
+
+<div class="loading-bar" id="loading"></div>
+
+<div class="sidebar" id="sidebar">
+  <div class="sidebar-logo">
+    <svg width="28" height="28" viewBox="0 0 100 120" fill="none" aria-hidden="true">
+      <path d="M50 0 C50 0 8 42 8 72 C8 94 27 112 50 112 C73 112 92 94 92 72 C92 42 50 0 50 0Z" fill="white"/>
+    </svg>
+    <div>
+      <h1>Clean it</h1>
+      <span>gestión de servicios</span>
+    </div>
+  </div>
+  <div class="nav" id="nav"></div>
+  <div class="sidebar-footer">
+    <div class="perfil" id="sidebar-perfil">Clean it</div>
+    <button onclick="cerrarSesion()">Cerrar sesión</button>
+  </div>
+</div>
+
+<div class="main">
+  <div class="topbar" id="topbar">
+    <h2 id="topbar-title">Servicios</h2>
+    <span class="topbar-meta" id="topbar-meta"></span>
+  </div>
+  <div class="content" id="content"></div>
+</div>
+
+<div class="modal-overlay" id="modal"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
