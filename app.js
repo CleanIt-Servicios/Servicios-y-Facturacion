@@ -23,6 +23,7 @@ const APP = {
   supervisores: [],   // hoja 4
   distribucion: [],   // hoja 5  (1 fila por servicio, con array de turnos)
   movimientos: [],    // hoja 8
+  reclamos: [],       // hoja 9  (reclamos de facturación)
 
   // --- Auth ---
   auth: {
@@ -32,7 +33,7 @@ const APP = {
   },
 
   // --- Contadores de ID (para prefijos únicos) ---
-  contadores: { S: 0, O: 0, P: 0, M: 0 },
+  contadores: { S: 0, O: 0, P: 0, M: 0, R: 0 },
 };
 
 // ============================================================
@@ -47,11 +48,11 @@ const USUARIOS_LOGIN = {
 
 const PERMISOS = {
   rrhh: {
-    screens: ["servicios","operarios","personal","distribucion","control","movimientos","prefac","config"],
+    screens: ["servicios","operarios","personal","distribucion","control","movimientos","prefac","reclamos","config"],
     editar: true, verValores: true, verFacturacion: true, darBaja: true, configurar: true, verTodo: true,
   },
   facturacion: {
-    screens: ["servicios","prefac","movimientos"],
+    screens: ["servicios","prefac","movimientos","reclamos"],
     editar: false, verValores: true, verFacturacion: true, darBaja: false, configurar: false, verTodo: true,
   },
   jefe: {
@@ -95,6 +96,7 @@ function guardarLocal(){
       supervisores: APP.supervisores,
       distribucion: APP.distribucion,
       movimientos: APP.movimientos,
+      reclamos: APP.reclamos,
       contadores: APP.contadores,
     }));
   }catch(e){ console.error("Error guardando local:", e); }
@@ -111,7 +113,8 @@ function cargarLocal(){
     APP.supervisores = d.supervisores || [];
     APP.distribucion = d.distribucion || [];
     APP.movimientos  = d.movimientos  || [];
-    APP.contadores   = d.contadores   || { S:0, O:0, P:0, M:0 };
+    APP.reclamos     = d.reclamos     || [];
+    APP.contadores   = d.contadores   || { S:0, O:0, P:0, M:0, R:0 };
     return true;
   }catch(e){ console.error("Error cargando local:", e); return false; }
 }
@@ -130,6 +133,7 @@ async function cargarDeDrive(){
       APP.supervisores = data.supervisores || [];
       APP.distribucion = data.distribucion || [];
       APP.movimientos  = (data.movimientos || []).map(normalizarMovimiento);
+      APP.reclamos     = data.reclamos || [];
       // Recalcular contadores desde los IDs existentes (para no repetir)
       recalcularContadores();
       guardarLocal();
@@ -156,6 +160,7 @@ function recalcularContadores(){
     O: maxId(APP.operarios, "O"),
     P: maxId(APP.supervisores, "P"),
     M: maxId(APP.movimientos, "M"),
+    R: maxId(APP.reclamos, "R"),
   };
 }
 
@@ -205,6 +210,29 @@ async function driveAddMovimiento(mov){
   if(!driveActivo()) return;
   try{
     await fetch(SCRIPT_URL, { method:"POST", body: JSON.stringify({ action:"addMovimiento", movimiento:mov })});
+  }catch(e){ console.error(e); }
+}
+
+async function driveDeleteMovimiento(movId){
+  if(!driveActivo()) return;
+  try{
+    await fetch(SCRIPT_URL, { method:"POST", body: JSON.stringify({ action:"deleteMovimiento", id:movId })});
+  }catch(e){ console.error(e); }
+}
+
+async function driveSaveReclamo(id){
+  if(!driveActivo()) return;
+  const r = APP.reclamos.find(x => x.id === id);
+  if(!r) return;
+  try{
+    await fetch(SCRIPT_URL, { method:"POST", body: JSON.stringify({ action:"upsertReclamo", reclamo:r })});
+  }catch(e){ console.error(e); }
+}
+
+async function driveDeleteReclamo(id){
+  if(!driveActivo()) return;
+  try{
+    await fetch(SCRIPT_URL, { method:"POST", body: JSON.stringify({ action:"deleteReclamo", id:id })});
   }catch(e){ console.error(e); }
 }
 
@@ -272,13 +300,14 @@ const SCREENS = {
   control:      { titulo: "Control de horas", icono: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" },
   movimientos:  { titulo: "Movimientos",      icono: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" },
   prefac:       { titulo: "Prefacturación",   icono: "M9 7h6m-6 4h6m-6 4h4m-8 4h12a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z" },
+  reclamos:     { titulo: "Reclamos",         icono: "M12 9v2m0 4h.01M5 19h14a2 2 0 001.84-2.75L13.74 4a2 2 0 00-3.5 0L3.16 16.25A2 2 0 005 19z" },
   config:       { titulo: "Configuración",    icono: "M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" },
 };
 
 const NAV_GROUPS = [
   { label: "Operaciones", items: ["servicios","distribucion","control"] },
   { label: "Personal",    items: ["operarios","personal"] },
-  { label: "Gestión",     items: ["movimientos","prefac"] },
+  { label: "Gestión",     items: ["movimientos","prefac","reclamos"] },
   { label: "Sistema",     items: ["config"] },
 ];
 
@@ -789,14 +818,12 @@ function verPlanillaOperario(id){
 
 // Recorre todos los servicios y junta los días donde este operario trabajó
 function datosPlanillaOperario(opId, y, m){
-  const porServicio = {}; // svcId → {svc, dias:[{iso,d,dw,turno,hs,estado}], totalHs}
+  const porServicio = {}; // svcId → {svc, dias:[...], totales}
   APP.servicios.filter(s => s.estado==="activo").forEach(svc => {
     const filas = planillaServicio(svc.id, y, m);
     filas.forEach(f => f.turnos.forEach(t => {
-      // El operario aparece si es el titular del turno, o si cubrió como reemplazo
       const esTitular = t.turno.operarioId === opId;
       const esReemplazo = t.mov && t.mov.reemplazoId === opId;
-      // Si el titular faltó (ausencia o lo reemplazaron), no le contamos las horas al titular
       const titularNoTrabajo = t.mov && (t.mov.tipo==="ausencia" || t.mov.tipo==="reemplazo");
 
       let cuenta = false, hs = 0, rol = "";
@@ -805,7 +832,12 @@ function datosPlanillaOperario(opId, y, m){
 
       if(cuenta){
         if(!porServicio[svc.id]) porServicio[svc.id] = { svc, dias:[], totalHs:0, hsSimples:0, hsFeriado:0 };
-        porServicio[svc.id].dias.push({ iso:f.iso, d:f.d, dw:f.dw, turno:t.turno.nombre, hs, estado:t.estado, rol, feriado:f.feriado });
+        // Horario real del día
+        const hor = (t.mov && t.mov.entrada && t.mov.salida) ? {entrada:t.mov.entrada, salida:t.mov.salida} : (t.horario||{entrada:"",salida:""});
+        porServicio[svc.id].dias.push({
+          iso:f.iso, d:f.d, dw:f.dw, turno:t.turno.nombre, hs, estado:t.estado, rol,
+          feriado:f.feriado, entrada:hor.entrada, salida:hor.salida,
+        });
         porServicio[svc.id].totalHs += hs;
         if(t.estado==="feriado_trab") porServicio[svc.id].hsFeriado += hs;
         else porServicio[svc.id].hsSimples += hs;
@@ -831,18 +863,54 @@ function renderPlanillaOperario(){
   const totalSimples = servicios.reduce((a,s)=>a+s.hsSimples,0);
   const totalFeriado = servicios.reduce((a,s)=>a+s.hsFeriado,0);
 
-  const bloques = servicios.map(s => {
-    const dias = s.dias.slice().sort((a,b)=>a.iso.localeCompare(b.iso));
-    const filasDias = dias.map(dd => `<tr>
-      <td style="padding:6px 12px;font-family:monospace;font-size:11px">${String(dd.d).padStart(2,"0")}/${String(APP.mes.m+1).padStart(2,"0")} <span style="color:var(--text3)">${DIAS_LETRA[dd.dw]}</span></td>
-      <td style="padding:6px 12px;font-size:11px">${dd.turno}</td>
-      <td style="padding:6px 12px">${dd.rol==="reemplazo"?'<span style="font-size:10px;color:var(--blue-txt)">cubrió</span>':''}${dd.feriado?' <span style="font-size:10px;color:var(--amber-txt)">feriado</span>':''}</td>
-      <td style="padding:6px 12px;text-align:right;font-family:monospace;font-size:11px">${fmtHoras(dd.hs)}</td>
-    </tr>`).join("");
-    return `<div class="card">
-      <div class="card-header"><h3>${s.svc.nombre}</h3>
-        <span style="font-size:12px;color:var(--text2)">${fmtHoras(s.totalHs)} hs · ${s.dias.length} día(s)</span></div>
-      <table style="width:100%;border-collapse:collapse"><tbody>${filasDias}</tbody></table>
+  const DIAS_LARGO = ["DOMINGO","LUNES","MARTES","MIÉRCOLES","JUEVES","VIERNES","SÁBADO"];
+  const diasMes = diasDelMes(APP.mes.y, APP.mes.m);
+
+  const bloques = servicios.map((s, idx) => {
+    // Indexar los días trabajados por iso para cruzar con el calendario completo
+    const porIso = {};
+    s.dias.forEach(dd => { porIso[dd.iso] = dd; });
+
+    const filasDias = diasMes.map(({d,dw,iso}) => {
+      const dd = porIso[iso];
+      const fer = esFeriado(iso);
+      const esDomingo = dw === 0;
+      const bg = fer ? "background:#FCF3D9;" : (esDomingo ? "background:#FBE4D5;" : "");
+      const entrada = dd ? dd.entrada : "";
+      const salida = dd ? dd.salida : "";
+      const hs = dd ? dd.hs : 0;
+      const obs = dd && dd.rol==="reemplazo" ? "Cubrió" : "";
+      return `<tr style="${bg}">
+        <td style="padding:5px 10px;font-family:monospace;font-size:11px;border:0.5px solid var(--border)">${String(d).padStart(2,"0")}/${String(APP.mes.m+1).padStart(2,"0")}/${APP.mes.y}</td>
+        <td style="padding:5px 10px;font-size:11px;border:0.5px solid var(--border)">${DIAS_LARGO[dw]}</td>
+        <td style="padding:5px 10px;font-family:monospace;font-size:11px;text-align:center;border:0.5px solid var(--border)">${entrada}</td>
+        <td style="padding:5px 10px;font-family:monospace;font-size:11px;text-align:center;border:0.5px solid var(--border)">${salida}</td>
+        <td style="padding:5px 10px;font-size:10px;text-align:center;color:var(--amber-txt);border:0.5px solid var(--border)">${fer?"FERIADO":""}</td>
+        <td style="padding:5px 10px;font-size:10px;border:0.5px solid var(--border)">${obs}</td>
+        <td style="padding:5px 10px;font-family:monospace;font-size:11px;text-align:right;border:0.5px solid var(--border)">${fmtHoras(hs)}</td>
+      </tr>`;
+    }).join("");
+
+    return `<div class="card" style="overflow:hidden">
+      <div class="card-header" style="background:var(--surface2)">
+        <h3>${servicios.length>1?`Servicio ${idx+1} · `:""}${s.svc.nombre}</h3>
+        <span style="font-size:12px;color:var(--text2)">${fmtHoras(s.totalHs)} hs</span></div>
+      <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
+        <thead><tr style="background:var(--surface2)">
+          <th style="padding:6px 10px;font-size:9px;color:var(--text3);text-transform:uppercase;border:0.5px solid var(--border);text-align:left">Fecha</th>
+          <th style="padding:6px 10px;font-size:9px;color:var(--text3);text-transform:uppercase;border:0.5px solid var(--border);text-align:left">Día</th>
+          <th style="padding:6px 10px;font-size:9px;color:var(--text3);text-transform:uppercase;border:0.5px solid var(--border)">Entrada</th>
+          <th style="padding:6px 10px;font-size:9px;color:var(--text3);text-transform:uppercase;border:0.5px solid var(--border)">Salida</th>
+          <th style="padding:6px 10px;font-size:9px;color:var(--text3);text-transform:uppercase;border:0.5px solid var(--border)">Feriado</th>
+          <th style="padding:6px 10px;font-size:9px;color:var(--text3);text-transform:uppercase;border:0.5px solid var(--border);text-align:left">Obs</th>
+          <th style="padding:6px 10px;font-size:9px;color:var(--text3);text-transform:uppercase;border:0.5px solid var(--border);text-align:right">Horas</th>
+        </tr></thead>
+        <tbody>${filasDias}</tbody>
+        <tfoot><tr style="background:var(--surface2);font-weight:600">
+          <td colspan="6" style="padding:6px 10px;text-align:right;font-size:11px;border:0.5px solid var(--border)">Total del servicio</td>
+          <td style="padding:6px 10px;text-align:right;font-family:monospace;font-size:12px;border:0.5px solid var(--border)">${fmtHoras(s.totalHs)}</td>
+        </tr></tfoot>
+      </table></div>
     </div>`;
   }).join("");
 
@@ -851,7 +919,10 @@ function renderPlanillaOperario(){
         <button class="btn btn-sm" onclick="OPERARIO_SEL=null;APP.screen='operarios';render()">‹ Volver</button>
         <h2 style="font-size:16px;font-weight:500">${op.nombreCompleto}</h2>
       </div>
-      ${navMes}
+      <div style="display:flex;align-items:center;gap:10px">
+        <button class="btn btn-sm" onclick="descargarPlanillaOperario('${op.id}')">⬇️ Excel</button>
+        ${navMes}
+      </div>
     </div>
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px">
       <div class="card" style="margin:0;padding:12px 16px"><div style="font-size:10px;color:var(--text3);text-transform:uppercase">Hs simples</div><div style="font-size:22px;font-weight:500;color:var(--primary)">${fmtHoras(totalSimples)}</div></div>
@@ -860,6 +931,49 @@ function renderPlanillaOperario(){
       <div class="card" style="margin:0;padding:12px 16px"><div style="font-size:10px;color:var(--text3);text-transform:uppercase">Servicios</div><div style="font-size:22px;font-weight:500">${servicios.length}</div></div>
     </div>
     ${bloques || `<div class="card"><div class="placeholder"><h3>Sin actividad</h3><p>${op.nombreCompleto} no tiene días registrados en ${MESES[APP.mes.m]} ${APP.mes.y}.</p></div></div>`}`;
+}
+
+// Descarga la planilla del operario en Excel (CSV), separada por servicio
+function descargarPlanillaOperario(opId){
+  const op = APP.operarios.find(o => o.id === opId);
+  if(!op) return;
+  const datos = datosPlanillaOperario(opId, APP.mes.y, APP.mes.m);
+  const servicios = Object.values(datos).sort((a,b)=>a.svc.nombre.localeCompare(b.svc.nombre,"es"));
+  const DIAS_LARGO = ["DOMINGO","LUNES","MARTES","MIÉRCOLES","JUEVES","VIERNES","SÁBADO"];
+  const diasMes = diasDelMes(APP.mes.y, APP.mes.m);
+
+  let lineas = [];
+  lineas.push(`Planilla de operario;${op.nombreCompleto}`);
+  lineas.push(`Período;${MESES[APP.mes.m]} ${APP.mes.y}`);
+  lineas.push("");
+
+  if(!servicios.length){
+    lineas.push("Sin actividad registrada este mes.");
+  }
+
+  servicios.forEach((s, idx) => {
+    lineas.push(`${servicios.length>1?`SERVICIO ${idx+1} - `:""}${s.svc.nombre}`);
+    lineas.push("Fecha;Día;Entrada;Salida;Feriado;Obs;Horas");
+    const porIso = {};
+    s.dias.forEach(dd => { porIso[dd.iso] = dd; });
+    diasMes.forEach(({d,dw,iso}) => {
+      const dd = porIso[iso];
+      const fer = esFeriado(iso);
+      const fecha = `${String(d).padStart(2,"0")}/${String(APP.mes.m+1).padStart(2,"0")}/${APP.mes.y}`;
+      lineas.push([
+        fecha, DIAS_LARGO[dw], dd?dd.entrada:"", dd?dd.salida:"",
+        fer?"FERIADO":"", (dd&&dd.rol==="reemplazo")?"Cubrió":"", dd?fmtHoras(dd.hs):"0",
+      ].join(";"));
+    });
+    lineas.push(`;;;;;;`);
+    lineas.push(`;;;;;Total ${s.svc.nombre};${fmtHoras(s.totalHs)}`);
+    lineas.push("");
+  });
+
+  const totalGeneral = servicios.reduce((a,s)=>a+s.totalHs,0);
+  lineas.push(`;;;;;TOTAL GENERAL;${fmtHoras(totalGeneral)}`);
+
+  descargarCSV(lineas, `Planilla_${op.nombreCompleto.replace(/[^a-zA-Z0-9]/g,"_")}_${MESES[APP.mes.m]}_${APP.mes.y}.csv`);
 }
 function renderPersonal(){
   const activos = APP.supervisores.filter(s => s.estado === "activo")
@@ -1146,6 +1260,8 @@ function renderControl(){
   const filas = planillaServicio(svc.id, APP.mes.y, APP.mes.m);
   const r = resumenPlanilla(svc.id, APP.mes.y, APP.mes.m);
 
+  const puedeEditarPlanilla = tienePermiso("editar");
+
   const filasHtml = filas.map(f => {
     return f.turnos.map((t,ti) => {
       const el = ESTADO_LABEL[t.estado] || ESTADO_LABEL.trabajado;
@@ -1162,6 +1278,9 @@ function renderControl(){
         <td style="padding:8px 12px;font-family:monospace;font-size:11px;color:var(--text2)">${horReal}${opNom?`<br><span style="font-size:10px;color:var(--blue-txt)">↳ ${opNom}</span>`:""}</td>
         <td style="padding:8px 12px"><span style="background:${el.bg};color:${el.fg};font-size:11px;padding:2px 8px;border-radius:20px">${el.txt}</span></td>
         <td style="padding:8px 12px;font-family:monospace;font-size:12px;text-align:right">${t.hs>0?fmtHoras(t.hs):"—"}</td>
+        ${puedeEditarPlanilla?`<td style="padding:8px 12px;text-align:center">
+          <button class="btn btn-sm" style="font-size:11px;padding:3px 8px" onclick="editarDiaPlanilla('${svc.id}','${t.turno.id}','${f.iso}')">✏️</button>
+        </td>`:""}
       </tr>`;
     }).join("");
   }).join("");
@@ -1190,6 +1309,7 @@ function renderControl(){
         <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Horario</th>
         <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Estado</th>
         <th style="text-align:right;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Hs</th>
+        ${puedeEditarPlanilla?`<th style="padding:8px 12px"></th>`:""}
       </tr></thead>
       <tbody>${filasHtml}</tbody>
     </table></div>`;
@@ -1427,6 +1547,119 @@ const TIPO_MOV_LABEL = {
   feriado_trabajado:"Feriado trabajado", cambio_temporal:"Cambio temporal",
 };
 
+// ============================================================
+// EDITAR DÍA DE PLANILLA (RRHH) — corrige lo ya fichado
+// Crea, reemplaza o borra el movimiento de ese día/turno
+// ============================================================
+let EDIT_DIA = null;
+
+function editarDiaPlanilla(svcId, turnoId, iso){
+  const dist = distDe(svcId);
+  const turno = (dist.turnos||[]).find(t => t.id === turnoId);
+  if(!turno){ alert("No se encontró el turno"); return; }
+  // Buscar si ya hay un movimiento para este día/turno
+  const movExistente = APP.movimientos.find(m => m.svcId===svcId && m.turnoId===turnoId && m.fecha===iso);
+  const dw = new Date(iso+"T00:00:00").getDay();
+  const hd = horarioDia(turno, dw);
+
+  EDIT_DIA = {
+    svcId, turnoId, iso,
+    turnoNombre: turno.nombre,
+    movId: movExistente ? movExistente.id : null,
+    // Estado actual: si hay mov usa su tipo, si no "normal"
+    tipo: movExistente ? movExistente.tipo : "normal",
+    reemplazoId: movExistente ? (movExistente.reemplazoId||"") : "",
+    horarioDistinto: movExistente ? !!(movExistente.entrada && movExistente.salida) : false,
+    entrada: movExistente && movExistente.entrada ? movExistente.entrada : hd.entrada,
+    salida: movExistente && movExistente.salida ? movExistente.salida : hd.salida,
+    obs: movExistente ? (movExistente.obs||"") : "",
+    horarioBase: hd,
+  };
+  mostrarModalEditarDia();
+}
+
+function mostrarModalEditarDia(){
+  const e = EDIT_DIA;
+  const fechaTxt = e.iso.split("-").reverse().join("/");
+  const opsOpts = APP.operarios.filter(o=>o.estado==="activo")
+    .map(o=>`<option value="${o.id}" ${e.reemplazoId===o.id?"selected":""}>${o.nombreCompleto}</option>`).join("");
+
+  const modal = document.getElementById("modal");
+  modal.innerHTML = `
+    <div class="modal-backdrop" onclick="cerrarModal();EDIT_DIA=null"></div>
+    <div class="modal-box">
+      <div class="modal-title">✏️ Corregir día — ${fechaTxt}</div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:14px">${e.turnoNombre} · horario base ${e.horarioBase.entrada}-${e.horarioBase.salida}</div>
+
+      <div class="modal-field"><label>Estado del día</label>
+        <select onchange="EDIT_DIA.tipo=this.value;mostrarModalEditarDia()">
+          <option value="normal" ${e.tipo==="normal"?"selected":""}>Normal (trabajado)</option>
+          <option value="ausencia" ${e.tipo==="ausencia"?"selected":""}>Ausencia</option>
+          <option value="reemplazo" ${e.tipo==="reemplazo"?"selected":""}>Reemplazo</option>
+          <option value="feriado_trabajado" ${e.tipo==="feriado_trabajado"?"selected":""}>Feriado trabajado</option>
+          <option value="cambio_temporal" ${e.tipo==="cambio_temporal"?"selected":""}>Cambio de horario</option>
+        </select></div>
+
+      ${e.tipo==="reemplazo"?`<div class="modal-field"><label>Operario que cubrió</label>
+        <select onchange="EDIT_DIA.reemplazoId=this.value"><option value="">— Elegí —</option>${opsOpts}</select></div>
+        <div class="modal-field" style="margin-bottom:6px"><label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" ${e.horarioDistinto?"checked":""} onchange="EDIT_DIA.horarioDistinto=this.checked;mostrarModalEditarDia()" style="width:auto">
+          Hizo otro horario</label></div>
+        ${e.horarioDistinto?`<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div class="modal-field"><label>Entrada real</label><input type="time" value="${e.entrada}" onchange="EDIT_DIA.entrada=this.value"></div>
+          <div class="modal-field"><label>Salida real</label><input type="time" value="${e.salida}" onchange="EDIT_DIA.salida=this.value"></div>
+        </div>`:""}`:""}
+
+      ${e.tipo==="cambio_temporal"?`<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="modal-field"><label>Nueva entrada</label><input type="time" value="${e.entrada}" onchange="EDIT_DIA.entrada=this.value"></div>
+        <div class="modal-field"><label>Nueva salida</label><input type="time" value="${e.salida}" onchange="EDIT_DIA.salida=this.value"></div>
+      </div>`:""}
+
+      <div class="modal-field"><label>Observación (opcional)</label>
+        <input type="text" value="${e.obs}" onchange="EDIT_DIA.obs=this.value" placeholder="Detalle..."></div>
+
+      <div class="modal-actions">
+        <button class="btn" onclick="cerrarModal();EDIT_DIA=null">Cancelar</button>
+        <button class="btn btn-primary" onclick="guardarEdicionDia()">Guardar</button>
+      </div>
+    </div>`;
+  modal.style.display = "flex";
+}
+
+function guardarEdicionDia(){
+  const e = EDIT_DIA;
+  if(e.tipo==="reemplazo" && !e.reemplazoId){ alert("Elegí quién cubrió"); return; }
+
+  // Si había un movimiento previo, lo quitamos (lo vamos a reemplazar o dejar en normal)
+  if(e.movId){
+    APP.movimientos = APP.movimientos.filter(m => m.id !== e.movId);
+    driveDeleteMovimiento(e.movId);
+  }
+
+  // Si el nuevo estado es "normal", con haber borrado el movimiento alcanza
+  if(e.tipo !== "normal"){
+    let entrada = "", salida = "";
+    if(e.tipo==="cambio_temporal"){ entrada=e.entrada; salida=e.salida; }
+    else if(e.tipo==="reemplazo" && e.horarioDistinto){ entrada=e.entrada; salida=e.salida; }
+
+    const mov = {
+      id: nuevoId("M"),
+      svcId: e.svcId, turnoId: e.turnoId, fecha: e.iso, tipo: e.tipo,
+      reemplazoId: e.reemplazoId||"", entrada, salida, obs: e.obs||"",
+      quien: APP.auth.supervisorId || APP.auth.perfil,
+      quienNombre: APP.auth.usuario,
+      timestamp: new Date().toISOString(),
+    };
+    APP.movimientos.push(mov);
+    driveAddMovimiento(mov);
+  }
+
+  guardarLocal();
+  cerrarModal();
+  EDIT_DIA = null;
+  render();
+}
+
 function renderMovimientos(){
   const pref = isoFecha(APP.mes.y, APP.mes.m, 1).slice(0,7);
   let movs = APP.movimientos.filter(m => (m.fecha||"").startsWith(pref));
@@ -1599,6 +1832,126 @@ function renderPrefac(){
       ℹ️ <strong>Tipo A:</strong> subtotal + 21% IVA · <strong>Tipo B:</strong> IVA incluido en el valor hora · Feriados trabajados cuentan doble.
     </div>`;
 }
+
+// ============================================================
+// RECLAMOS DE FACTURACIÓN
+// ============================================================
+const ESTADO_RECLAMO = {
+  abierto:   { txt:"Abierto",   bg:"var(--amber-bg)", fg:"var(--amber-txt)" },
+  en_proceso:{ txt:"En proceso",bg:"var(--blue-bg)",  fg:"var(--blue-txt)" },
+  resuelto:  { txt:"Resuelto",  bg:"var(--green-bg)", fg:"var(--green-txt)" },
+};
+
+function renderReclamos(){
+  const reclamos = (APP.reclamos||[]).slice().sort((a,b)=>(b.fecha||"").localeCompare(a.fecha||""));
+  const nombreSvc = id => { const s=APP.servicios.find(x=>x.id===id); return s?s.nombre:"—"; };
+
+  const filas = reclamos.map(r => {
+    const e = ESTADO_RECLAMO[r.estado] || ESTADO_RECLAMO.abierto;
+    return `<tr>
+      <td style="padding:9px 12px;font-family:monospace;font-size:11px">${(r.fecha||"").split("-").reverse().join("/")}</td>
+      <td style="padding:9px 12px;font-size:12px"><strong>${nombreSvc(r.svcId)}</strong></td>
+      <td style="padding:9px 12px;font-size:12px">${r.motivo||""}</td>
+      <td style="padding:9px 12px;font-size:11px;color:var(--text2);max-width:280px">${r.detalle||""}</td>
+      <td style="padding:9px 12px"><span style="background:${e.bg};color:${e.fg};font-size:11px;padding:2px 8px;border-radius:20px">${e.txt}</span></td>
+      <td style="padding:9px 12px;white-space:nowrap">
+        <button class="btn btn-sm" onclick="editarReclamo('${r.id}')">Editar</button>
+        <button class="btn btn-sm" onclick="eliminarReclamo('${r.id}')" style="color:var(--red-txt)">Borrar</button>
+      </td>
+    </tr>`;
+  }).join("");
+
+  const abiertos = reclamos.filter(r => r.estado !== "resuelto").length;
+
+  return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <div style="font-size:12px;color:var(--text2)">${reclamos.length} reclamo(s) · ${abiertos} sin resolver</div>
+      <button class="btn btn-primary" onclick="nuevoReclamo()">+ Nuevo reclamo</button>
+    </div>
+    <div class="card"><div class="card-header"><h3>Reclamos de facturación</h3></div>
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
+      <thead><tr style="background:var(--surface2)">
+        <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Fecha</th>
+        <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Servicio</th>
+        <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Motivo</th>
+        <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Detalle</th>
+        <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Estado</th>
+        <th style="padding:8px 12px"></th>
+      </tr></thead>
+      <tbody>${filas || `<tr><td colspan="6" style="text-align:center;padding:32px;color:var(--text3)">No hay reclamos cargados.</td></tr>`}</tbody>
+    </table></div></div>`;
+}
+
+function nuevoReclamo(){ abrirModalReclamo(null); }
+function editarReclamo(id){ abrirModalReclamo(id); }
+
+function abrirModalReclamo(id){
+  const r = id ? APP.reclamos.find(x => x.id === id) : null;
+  const svcsOpts = APP.servicios.filter(s=>s.estado==="activo")
+    .sort((a,b)=>a.nombre.localeCompare(b.nombre,"es"))
+    .map(s=>`<option value="${s.id}" ${r&&r.svcId===s.id?"selected":""}>${s.nombre}</option>`).join("");
+
+  const modal = document.getElementById("modal");
+  modal.innerHTML = `
+    <div class="modal-backdrop" onclick="cerrarModal()"></div>
+    <div class="modal-box">
+      <div class="modal-title">${r?"Editar":"Nuevo"} reclamo</div>
+      <div class="modal-field"><label>Servicio</label>
+        <select id="rec-svc"><option value="">— Elegí —</option>${svcsOpts}</select></div>
+      <div class="modal-field"><label>Fecha</label>
+        <input id="rec-fecha" type="date" value="${r?r.fecha:hoyISO()}"></div>
+      <div class="modal-field"><label>Motivo</label>
+        <input id="rec-motivo" type="text" value="${r?(r.motivo||''):''}" placeholder="Ej: Exceso de horas facturadas"></div>
+      <div class="modal-field"><label>Detalle</label>
+        <textarea id="rec-detalle" rows="3" style="width:100%;padding:9px 12px;border:1px solid var(--border2);border-radius:var(--radius);font-size:13px;font-family:inherit;resize:vertical" placeholder="Descripción del reclamo...">${r?(r.detalle||''):''}</textarea></div>
+      <div class="modal-field"><label>Estado</label>
+        <select id="rec-estado">
+          <option value="abierto" ${r&&r.estado==="abierto"?"selected":""}>Abierto</option>
+          <option value="en_proceso" ${r&&r.estado==="en_proceso"?"selected":""}>En proceso</option>
+          <option value="resuelto" ${r&&r.estado==="resuelto"?"selected":""}>Resuelto</option>
+        </select></div>
+      <div class="modal-actions">
+        <button class="btn" onclick="cerrarModal()">Cancelar</button>
+        <button class="btn btn-primary" onclick="guardarReclamo('${id||''}')">${r?"Guardar":"Crear"}</button>
+      </div>
+    </div>`;
+  modal.style.display = "flex";
+}
+
+function guardarReclamo(id){
+  const svcId  = document.getElementById("rec-svc").value;
+  const fecha  = document.getElementById("rec-fecha").value;
+  const motivo = document.getElementById("rec-motivo").value.trim();
+  const detalle= document.getElementById("rec-detalle").value.trim();
+  const estado = document.getElementById("rec-estado").value;
+  if(!svcId){ alert("Elegí el servicio"); return; }
+  if(!motivo){ alert("Ingresá el motivo"); return; }
+
+  let recId = id;
+  if(id){
+    APP.reclamos = APP.reclamos.map(r => r.id===id ? {...r, svcId, fecha, motivo, detalle, estado} : r);
+  } else {
+    recId = nuevoId("R");
+    APP.reclamos.push({
+      id: recId, svcId, fecha, motivo, detalle, estado,
+      quien: APP.auth.usuario, timestamp: new Date().toISOString(),
+    });
+  }
+  guardarLocal();
+  driveSaveReclamo(recId);
+  cerrarModal();
+  render();
+}
+
+function eliminarReclamo(id){
+  const r = APP.reclamos.find(x => x.id === id);
+  if(!r) return;
+  if(!confirm("¿Borrar este reclamo?")) return;
+  APP.reclamos = APP.reclamos.filter(x => x.id !== id);
+  guardarLocal();
+  driveDeleteReclamo(id);
+  render();
+}
+
 function renderConfig(){
   return `
     <div class="card"><div class="card-header"><h3>📥 Importar servicios desde backup</h3></div>
@@ -1784,6 +2137,7 @@ const RENDERERS = {
   control: renderControl,
   movimientos: renderMovimientos,
   prefac: renderPrefac,
+  reclamos: renderReclamos,
   config: renderConfig,
 };
 
