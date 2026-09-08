@@ -1982,12 +1982,36 @@ function horasSemanales(svcId){
   return total;
 }
 
+let COMERCIAL_VISTA = "lista"; // "lista" | "admin"
+
+// Clave normalizada de administrador: minúsculas, sin espacios de más
+function claveAdmin(s){
+  const c = (s.contacto||"").trim().toLowerCase().replace(/\s+/g," ");
+  return c || "(sin administración)";
+}
+
 function renderComercial(){
   const svcs = APP.servicios.filter(s => s.estado==="activo")
     .sort((a,b)=>a.nombre.localeCompare(b.nombre,"es"));
   const verVal = tienePermiso("verValores");
 
-  const filas = svcs.map(s => {
+  const toggle = `<div style="display:flex;gap:0;border:1px solid var(--border2);border-radius:var(--radius);overflow:hidden">
+    <button onclick="COMERCIAL_VISTA='lista';render()" style="padding:6px 14px;font-size:12px;border:none;cursor:pointer;background:${COMERCIAL_VISTA==='lista'?'var(--primary)':'var(--surface)'};color:${COMERCIAL_VISTA==='lista'?'#fff':'var(--text2)'}">Lista</button>
+    <button onclick="COMERCIAL_VISTA='admin';render()" style="padding:6px 14px;font-size:12px;border:none;cursor:pointer;background:${COMERCIAL_VISTA==='admin'?'var(--primary)':'var(--surface)'};color:${COMERCIAL_VISTA==='admin'?'#fff':'var(--text2)'}">Por administración</button>
+  </div>`;
+
+  const cab = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <div style="display:flex;align-items:center;gap:14px">
+        <div style="font-size:12px;color:var(--text2)">${svcs.length} consorcio(s) activo(s)</div>
+        ${toggle}
+      </div>
+      <button class="btn" onclick="descargarComercial()">⬇️ Descargar Excel</button>
+    </div>`;
+
+  const thVal = verVal?`<th style="text-align:right;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Valor hora</th>`:"";
+  const tdVal = (fac) => verVal?`<td style="padding:9px 12px;font-family:monospace;font-size:11px;text-align:right">${fac.tipoContrato==="fijo"?"Fijo: "+fmtMoneda(fac.montoFijo||0):fmtMoneda(fac.valorHora||0)}</td>`:"";
+
+  const filaSvc = (s) => {
     const fac = facDe(s.id);
     const hsSem = horasSemanales(s.id);
     return `<tr>
@@ -1997,27 +2021,63 @@ function renderComercial(){
       <td style="padding:9px 12px;font-size:11px">${s.telefono||"—"}</td>
       <td style="padding:9px 12px;font-size:11px">${s.contacto||"—"}</td>
       <td style="padding:9px 12px;font-family:monospace;font-size:11px;text-align:right">${fmtHoras(hsSem)}</td>
-      ${verVal?`<td style="padding:9px 12px;font-family:monospace;font-size:11px;text-align:right">${fac.tipoContrato==="fijo"?"Fijo: "+fmtMoneda(fac.montoFijo||0):fmtMoneda(fac.valorHora||0)}</td>`:""}
+      ${tdVal(fac)}
     </tr>`;
-  }).join("");
+  };
 
-  return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-      <div style="font-size:12px;color:var(--text2)">${svcs.length} consorcio(s) activo(s)</div>
-      <button class="btn" onclick="descargarComercial()">⬇️ Descargar Excel</button>
-    </div>
-    <div class="card"><div class="card-header"><h3>Cartera comercial</h3></div>
-    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
-      <thead><tr style="background:var(--surface2)">
+  const thead = `<thead><tr style="background:var(--surface2)">
         <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Consorcio</th>
         <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">CUIT</th>
         <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Mail</th>
         <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Teléfono</th>
         <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Administración</th>
         <th style="text-align:right;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Hs sem.</th>
-        ${verVal?`<th style="text-align:right;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Valor hora</th>`:""}
-      </tr></thead>
-      <tbody>${filas || `<tr><td colspan="7" style="text-align:center;padding:32px;color:var(--text3)">No hay consorcios cargados.</td></tr>`}</tbody>
-    </table></div></div>`;
+        ${thVal}
+      </tr></thead>`;
+
+  // --- VISTA LISTA (plana) ---
+  if(COMERCIAL_VISTA === "lista"){
+    const filas = svcs.map(filaSvc).join("");
+    return `${cab}
+      <div class="card"><div class="card-header"><h3>Cartera comercial</h3></div>
+      <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
+        ${thead}
+        <tbody>${filas || `<tr><td colspan="7" style="text-align:center;padding:32px;color:var(--text3)">No hay consorcios cargados.</td></tr>`}</tbody>
+      </table></div></div>`;
+  }
+
+  // --- VISTA POR ADMINISTRACIÓN (agrupada) ---
+  const grupos = {};
+  svcs.forEach(s => {
+    const k = claveAdmin(s);
+    if(!grupos[k]) grupos[k] = { nombre: (s.contacto||"").trim()||"(Sin administración)", svcs:[], hs:0 };
+    grupos[k].svcs.push(s);
+    grupos[k].hs += horasSemanales(s.id);
+  });
+  // Ordenar grupos por nombre, dejando "(Sin administración)" al final
+  const ordenados = Object.values(grupos).sort((a,b)=>{
+    if(a.nombre.startsWith("(Sin")) return 1;
+    if(b.nombre.startsWith("(Sin")) return -1;
+    return a.nombre.localeCompare(b.nombre,"es");
+  });
+
+  const bloques = ordenados.map(g => {
+    const filas = g.svcs.map(filaSvc).join("");
+    return `<div class="card">
+      <div class="card-header" style="background:var(--surface2)">
+        <h3>${g.nombre}</h3>
+        <span style="font-size:11px;color:var(--text2)">${g.svcs.length} consorcio(s) · ${fmtHoras(g.hs)} hs/sem</span>
+      </div>
+      <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
+        ${thead}
+        <tbody>${filas}</tbody>
+      </table></div>
+    </div>`;
+  }).join("");
+
+  return `${cab}
+    <div style="font-size:11px;color:var(--text3);margin-bottom:10px">${ordenados.length} administración(es)</div>
+    ${bloques || `<div class="card"><div class="placeholder"><h3>Sin datos</h3><p>No hay consorcios cargados.</p></div></div>`}`;
 }
 
 function descargarComercial(){
@@ -2027,15 +2087,37 @@ function descargarComercial(){
   let lineas = [];
   lineas.push("Cartera comercial;"+new Date().toLocaleDateString("es-AR"));
   lineas.push("");
-  lineas.push("Consorcio;CUIT;Mail;Teléfono;Administración;Horas semanales" + (verVal?";Valor hora":""));
-  svcs.forEach(s => {
+  const header = "Consorcio;CUIT;Mail;Teléfono;Administración;Horas semanales" + (verVal?";Valor hora":"");
+  const filaDe = (s) => {
     const fac = facDe(s.id);
     const hsSem = horasSemanales(s.id);
     const vh = verVal ? (fac.tipoContrato==="fijo" ? "Fijo "+Math.round(fac.montoFijo||0) : Math.round(fac.valorHora||0)) : "";
-    lineas.push([
-      s.nombre, s.cuit||"", s.mail||"", s.telefono||"", s.contacto||"", fmtHoras(hsSem)
-    ].concat(verVal?[vh]:[]).join(";"));
-  });
+    return [s.nombre, s.cuit||"", s.mail||"", s.telefono||"", s.contacto||"", fmtHoras(hsSem)].concat(verVal?[vh]:[]).join(";");
+  };
+
+  if(COMERCIAL_VISTA === "admin"){
+    // Agrupado por administración
+    const grupos = {};
+    svcs.forEach(s => {
+      const k = claveAdmin(s);
+      if(!grupos[k]) grupos[k] = { nombre:(s.contacto||"").trim()||"(Sin administración)", svcs:[], hs:0 };
+      grupos[k].svcs.push(s); grupos[k].hs += horasSemanales(s.id);
+    });
+    const ordenados = Object.values(grupos).sort((a,b)=>{
+      if(a.nombre.startsWith("(Sin")) return 1;
+      if(b.nombre.startsWith("(Sin")) return -1;
+      return a.nombre.localeCompare(b.nombre,"es");
+    });
+    ordenados.forEach(g => {
+      lineas.push(`ADMINISTRACIÓN: ${g.nombre};;;;;${fmtHoras(g.hs)} hs/sem`);
+      lineas.push(header);
+      g.svcs.forEach(s => lineas.push(filaDe(s)));
+      lineas.push("");
+    });
+  } else {
+    lineas.push(header);
+    svcs.forEach(s => lineas.push(filaDe(s)));
+  }
   descargarCSV(lineas, `Cartera_comercial_${new Date().toISOString().slice(0,10)}.csv`);
 }
 
