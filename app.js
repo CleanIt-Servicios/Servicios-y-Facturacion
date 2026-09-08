@@ -1778,6 +1778,16 @@ function fmtHoras(n){
   return Number.isInteger(n) ? String(n) : n.toFixed(1);
 }
 
+// Subtotal plano para Comercial: horas del mes por valor hora sin IVA, feriado x2.
+// No aplica IVA nunca, sea A o B — es lo facturado de trabajo puro.
+function subtotalPlano(svcId, y, m){
+  const fac = facDe(svcId);
+  if((fac.tipoContrato||"horas") === "fijo") return fac.montoFijo || 0;
+  const res = resumenPlanilla(svcId, y, m);
+  const vh = fac.valorHora || 0;
+  return vh * res.hsSimples + vh * 2 * res.hsFeriado;
+}
+
 function renderPrefac(){
   const svcs = APP.servicios.filter(s => {
     if(s.estado !== "activo") return true; // incluir bajas del mes
@@ -2026,8 +2036,8 @@ function renderComercial(){
   const thFact = verVal?`<th style="text-align:right;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Subtotal ${MESES[mAnt].slice(0,3)}</th>`:"";
   const tdFact = (svcId) => {
     if(!verVal) return "";
-    const f = calcFacturacion(svcId, yAnt, mAnt);
-    return `<td style="padding:9px 12px;font-family:monospace;font-size:11px;text-align:right">${f.subtotal>0?fmtMoneda(f.subtotal):"—"}</td>`;
+    const sub = subtotalPlano(svcId, yAnt, mAnt);
+    return `<td style="padding:9px 12px;font-family:monospace;font-size:11px;text-align:right">${sub>0?fmtMoneda(sub):"—"}</td>`;
   };
 
   const filaSvc = (s) => {
@@ -2115,7 +2125,7 @@ function descargarComercial(){
     const fac = facDe(s.id);
     const hsSem = horasSemanales(s.id);
     const vh = verVal ? (fac.tipoContrato==="fijo" ? "Fijo "+Math.round(fac.montoFijo||0) : Math.round(fac.valorHora||0)) : "";
-    const sub = verVal ? Math.round(calcFacturacion(s.id, yAnt, mAnt).subtotal) : "";
+    const sub = verVal ? Math.round(subtotalPlano(s.id, yAnt, mAnt)) : "";
     return [s.nombre, s.cuit||"", s.mail||"", s.telefono||"", s.contacto||"", fmtHoras(hsSem)].concat(verVal?[vh, sub]:[]).join(";");
   };
 
