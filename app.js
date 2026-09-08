@@ -88,7 +88,7 @@ function nuevoId(prefijo){
 // ============================================================
 const LS_KEY = "cleanit_v2";
 // Pegar acá la URL del Apps Script publicado (termina en /exec)
-const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw3whyuVsG4OwkQIMSoEc31lCDSdHqs-DiIN-bVYJq0Q4T26NNkGIyw_oFGer4kKnnH/exec";  // Apps Script publicado
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw6YtTBxJ3COqwxBWI2py1zNJuEP9SY8-7nhiv-2U-rEwCePKVp9QfKYHc5lEaTFeTx/exec";  // Apps Script de PRUEBA
 
 function driveActivo(){ return SCRIPT_URL && SCRIPT_URL.indexOf("/exec") > 0; }
 
