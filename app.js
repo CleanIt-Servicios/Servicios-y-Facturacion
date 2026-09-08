@@ -49,7 +49,7 @@ const USUARIOS_LOGIN = {
 
 const PERMISOS = {
   rrhh: {
-    screens: ["servicios","operarios","personal","distribucion","control","movimientos","prefac","reclamos","config"],
+    screens: ["servicios","bajas","operarios","personal","distribucion","control","movimientos","prefac","reclamos","config"],
     editar: true, verValores: true, verFacturacion: true, darBaja: true, configurar: true, verTodo: true,
   },
   facturacion: {
@@ -65,7 +65,7 @@ const PERMISOS = {
     editar: false, verValores: false, verFacturacion: false, darBaja: false, configurar: false, verTodo: false,
   },
   comercial: {
-    screens: ["comercial"],
+    screens: ["comercial","comercial-bajas"],
     editar: false, verValores: true, verFacturacion: false, darBaja: false, configurar: false, verTodo: true,
   },
 };
@@ -307,14 +307,16 @@ const SCREENS = {
   prefac:       { titulo: "Prefacturación",   icono: "M9 7h6m-6 4h6m-6 4h4m-8 4h12a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z" },
   reclamos:     { titulo: "Reclamos",         icono: "M12 9v2m0 4h.01M5 19h14a2 2 0 001.84-2.75L13.74 4a2 2 0 00-3.5 0L3.16 16.25A2 2 0 005 19z" },
   comercial:    { titulo: "Comercial",        icono: "M3 3v18h18M18 17V9M13 17V5M8 17v-3" },
+  bajas:        { titulo: "Bajas",             icono: "M18 6L6 18M6 6l12 12" },
+  "comercial-bajas": { titulo: "Bajas", icono: "M18 6L6 18M6 6l12 12" },
   config:       { titulo: "Configuración",    icono: "M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" },
 };
 
 const NAV_GROUPS = [
-  { label: "Operaciones", items: ["servicios","distribucion","control"] },
+  { label: "Operaciones", items: ["servicios","bajas","distribucion","control"] },
   { label: "Personal",    items: ["operarios","personal"] },
   { label: "Gestión",     items: ["movimientos","prefac","reclamos"] },
-  { label: "Comercial",   items: ["comercial"] },
+  { label: "Comercial",   items: ["comercial","comercial-bajas"] },
   { label: "Sistema",     items: ["config"] },
 ];
 
@@ -2005,11 +2007,28 @@ function renderComercial(){
         <div style="font-size:12px;color:var(--text2)">${svcs.length} consorcio(s) activo(s)</div>
         ${toggle}
       </div>
-      <button class="btn" onclick="descargarComercial()">⬇️ Descargar Excel</button>
+      <div style="display:flex;align-items:center;gap:10px">
+        ${verVal?`<div style="display:flex;align-items:center;gap:6px">
+          <button class="btn btn-sm" onclick="cambiarMes(-1)">‹</button>
+          <span style="font-size:12px;min-width:110px;text-align:center;color:var(--text2)">Subtotal a ${MESES[APP.mes.m]} ${APP.mes.y}</span>
+          <button class="btn btn-sm" onclick="cambiarMes(1)">›</button>
+        </div>`:""}
+        <button class="btn" onclick="descargarComercial()">⬇️ Descargar Excel</button>
+      </div>
     </div>`;
 
   const thVal = verVal?`<th style="text-align:right;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Valor hora</th>`:"";
   const tdVal = (fac) => verVal?`<td style="padding:9px 12px;font-family:monospace;font-size:11px;text-align:right">${fac.tipoContrato==="fijo"?"Fijo: "+fmtMoneda(fac.montoFijo||0):fmtMoneda(fac.valorHora||0)}</td>`:"";
+
+  // Mes anterior al que se está viendo
+  let mAnt = APP.mes.m - 1, yAnt = APP.mes.y;
+  if(mAnt < 0){ mAnt = 11; yAnt--; }
+  const thFact = verVal?`<th style="text-align:right;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Subtotal ${MESES[mAnt].slice(0,3)}</th>`:"";
+  const tdFact = (svcId) => {
+    if(!verVal) return "";
+    const f = calcFacturacion(svcId, yAnt, mAnt);
+    return `<td style="padding:9px 12px;font-family:monospace;font-size:11px;text-align:right">${f.subtotal>0?fmtMoneda(f.subtotal):"—"}</td>`;
+  };
 
   const filaSvc = (s) => {
     const fac = facDe(s.id);
@@ -2022,6 +2041,7 @@ function renderComercial(){
       <td style="padding:9px 12px;font-size:11px">${s.contacto||"—"}</td>
       <td style="padding:9px 12px;font-family:monospace;font-size:11px;text-align:right">${fmtHoras(hsSem)}</td>
       ${tdVal(fac)}
+      ${tdFact(s.id)}
     </tr>`;
   };
 
@@ -2033,6 +2053,7 @@ function renderComercial(){
         <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Administración</th>
         <th style="text-align:right;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Hs sem.</th>
         ${thVal}
+        ${thFact}
       </tr></thead>`;
 
   // --- VISTA LISTA (plana) ---
@@ -2084,15 +2105,18 @@ function descargarComercial(){
   const svcs = APP.servicios.filter(s => s.estado==="activo")
     .sort((a,b)=>a.nombre.localeCompare(b.nombre,"es"));
   const verVal = tienePermiso("verValores");
+  let mAnt = APP.mes.m - 1, yAnt = APP.mes.y;
+  if(mAnt < 0){ mAnt = 11; yAnt--; }
   let lineas = [];
   lineas.push("Cartera comercial;"+new Date().toLocaleDateString("es-AR"));
   lineas.push("");
-  const header = "Consorcio;CUIT;Mail;Teléfono;Administración;Horas semanales" + (verVal?";Valor hora":"");
+  const header = "Consorcio;CUIT;Mail;Teléfono;Administración;Horas semanales" + (verVal?`;Valor hora;Subtotal ${MESES[mAnt]}`:"");
   const filaDe = (s) => {
     const fac = facDe(s.id);
     const hsSem = horasSemanales(s.id);
     const vh = verVal ? (fac.tipoContrato==="fijo" ? "Fijo "+Math.round(fac.montoFijo||0) : Math.round(fac.valorHora||0)) : "";
-    return [s.nombre, s.cuit||"", s.mail||"", s.telefono||"", s.contacto||"", fmtHoras(hsSem)].concat(verVal?[vh]:[]).join(";");
+    const sub = verVal ? Math.round(calcFacturacion(s.id, yAnt, mAnt).subtotal) : "";
+    return [s.nombre, s.cuit||"", s.mail||"", s.telefono||"", s.contacto||"", fmtHoras(hsSem)].concat(verVal?[vh, sub]:[]).join(";");
   };
 
   if(COMERCIAL_VISTA === "admin"){
@@ -2119,6 +2143,158 @@ function descargarComercial(){
     svcs.forEach(s => lineas.push(filaDe(s)));
   }
   descargarCSV(lineas, `Cartera_comercial_${new Date().toISOString().slice(0,10)}.csv`);
+}
+
+// ============================================================
+// BAJAS — servicios inactivos, con carga histórica y reactivación
+// ============================================================
+function renderBajas(){
+  const bajas = APP.servicios.filter(s => s.estado==="inactivo")
+    .sort((a,b)=>(b.fechaBaja||"").localeCompare(a.fechaBaja||""));
+
+  const filas = bajas.map(s => `<tr>
+    <td style="padding:9px 12px;font-family:monospace;font-size:11px;color:var(--text3)">${s.id}</td>
+    <td style="padding:9px 12px;font-size:12px"><strong>${s.nombre}</strong></td>
+    <td style="padding:9px 12px;font-family:monospace;font-size:11px">${s.fechaBaja?s.fechaBaja.split("-").reverse().join("/"):"—"}</td>
+    <td style="padding:9px 12px;font-size:11px;color:var(--text2)">${s.motivoBaja||"—"}</td>
+    <td style="padding:9px 12px;white-space:nowrap">
+      <button class="btn btn-sm" onclick="editarServicio('${s.id}')">Ver datos</button>
+      <button class="btn btn-sm" onclick="editarBaja('${s.id}')">Editar baja</button>
+      <button class="btn btn-sm" onclick="reactivarServicio('${s.id}')" style="color:var(--green-txt)">Reactivar</button>
+    </td>
+  </tr>`).join("");
+
+  return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <div style="font-size:12px;color:var(--text2)">${bajas.length} servicio(s) de baja</div>
+      <button class="btn btn-primary" onclick="cargarBajaHistorica()">+ Cargar baja histórica</button>
+    </div>
+    <div class="card"><div class="card-header"><h3>Servicios de baja</h3></div>
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
+      <thead><tr style="background:var(--surface2)">
+        <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">ID</th>
+        <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Servicio</th>
+        <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Fecha baja</th>
+        <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Motivo</th>
+        <th style="padding:8px 12px"></th>
+      </tr></thead>
+      <tbody>${filas || `<tr><td colspan="5" style="text-align:center;padding:32px;color:var(--text3)">No hay servicios de baja.</td></tr>`}</tbody>
+    </table></div></div>`;
+}
+
+// Cargar una baja histórica: crea un servicio nuevo directo en estado inactivo
+function cargarBajaHistorica(){
+  const modal = document.getElementById("modal");
+  modal.innerHTML = `
+    <div class="modal-backdrop" onclick="cerrarModal()"></div>
+    <div class="modal-box">
+      <div class="modal-title">Cargar baja histórica</div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:14px">Se crea el servicio directamente como baja, con su ID. Después podés completar el resto de los datos editándolo, y si se recontrata lo reactivás.</div>
+      <div class="modal-field"><label>Nombre del servicio *</label>
+        <input id="baja-nombre" type="text" placeholder="Ej: Consorcio Rivadavia 4500"></div>
+      <div class="modal-field"><label>Fecha de baja</label>
+        <input id="baja-fecha" type="date" value="${hoyISO()}"></div>
+      <div class="modal-field"><label>Motivo</label>
+        <input id="baja-motivo" type="text" placeholder="Ej: Cambió de proveedor"></div>
+      <div class="modal-actions">
+        <button class="btn" onclick="cerrarModal()">Cancelar</button>
+        <button class="btn btn-primary" onclick="guardarBajaHistorica()">Crear baja</button>
+      </div>
+    </div>`;
+  modal.style.display = "flex";
+}
+
+function guardarBajaHistorica(){
+  const nombre = document.getElementById("baja-nombre").value.trim();
+  const fecha  = document.getElementById("baja-fecha").value;
+  const motivo = document.getElementById("baja-motivo").value.trim();
+  if(!nombre){ alert("Ingresá el nombre del servicio"); return; }
+
+  const svcId = nuevoId("S");
+  APP.servicios.push({
+    id: svcId, nombre, tipo:"Consorcio", cuit:"", mail:"", telefono:"", contacto:"",
+    razonSocial:"", supervisorId:"", fechaInicio:"",
+    estado:"inactivo", fechaBaja:fecha, motivoBaja:motivo,
+  });
+  // Facturación y distribución vacías por ahora
+  APP.facturacion.push({ svcId, valorHora:0, tipoFactura:"A", tipoContrato:"horas", montoFijo:0 });
+  APP.distribucion.push({ svcId, turnos:[] });
+
+  guardarLocal();
+  driveSaveServicio(svcId);
+  cerrarModal();
+  render();
+}
+
+// Editar solo la baja (fecha y motivo) — usado por RRHH y Comercial
+function editarBaja(id){
+  const s = APP.servicios.find(x => x.id === id);
+  if(!s) return;
+  const puedeReactivar = tienePermiso("darBaja");
+  const modal = document.getElementById("modal");
+  modal.innerHTML = `
+    <div class="modal-backdrop" onclick="cerrarModal()"></div>
+    <div class="modal-box">
+      <div class="modal-title">Editar baja — ${s.nombre}</div>
+      <div class="modal-field"><label>Fecha de baja</label>
+        <input id="baja-fecha" type="date" value="${s.fechaBaja||''}" ${puedeReactivar?'':'disabled'}></div>
+      <div class="modal-field"><label>Motivo</label>
+        <input id="baja-motivo" type="text" value="${s.motivoBaja||''}" placeholder="Motivo de la baja"></div>
+      <div class="modal-actions">
+        <button class="btn" onclick="cerrarModal()">Cancelar</button>
+        <button class="btn btn-primary" onclick="guardarEdicionBaja('${id}')">Guardar</button>
+      </div>
+    </div>`;
+  modal.style.display = "flex";
+}
+
+function guardarEdicionBaja(id){
+  const fecha  = document.getElementById("baja-fecha").value;
+  const motivo = document.getElementById("baja-motivo").value.trim();
+  APP.servicios = APP.servicios.map(s => s.id===id
+    ? {...s, fechaBaja: tienePermiso("darBaja")?fecha:s.fechaBaja, motivoBaja:motivo} : s);
+  guardarLocal();
+  driveSaveServicio(id);
+  cerrarModal();
+  render();
+}
+
+function reactivarServicio(id){
+  const s = APP.servicios.find(x => x.id === id);
+  if(!s) return;
+  if(!confirm(`¿Reactivar "${s.nombre}"? Vuelve a estado activo.`)) return;
+  APP.servicios = APP.servicios.map(x => x.id===id
+    ? {...x, estado:"activo", fechaBaja:"", motivoBaja:""} : x);
+  guardarLocal();
+  driveSaveServicio(id);
+  render();
+}
+
+// Vista de bajas para Comercial: ve todo, solo edita el motivo
+function renderComercialBajas(){
+  const bajas = APP.servicios.filter(s => s.estado==="inactivo")
+    .sort((a,b)=>(b.fechaBaja||"").localeCompare(a.fechaBaja||""));
+  const filas = bajas.map(s => `<tr>
+    <td style="padding:9px 12px;font-size:12px"><strong>${s.nombre}</strong></td>
+    <td style="padding:9px 12px;font-family:monospace;font-size:11px">${s.cuit||"—"}</td>
+    <td style="padding:9px 12px;font-size:11px">${s.contacto||"—"}</td>
+    <td style="padding:9px 12px;font-family:monospace;font-size:11px">${s.fechaBaja?s.fechaBaja.split("-").reverse().join("/"):"—"}</td>
+    <td style="padding:9px 12px;font-size:11px;color:var(--text2)">${s.motivoBaja||"—"}</td>
+    <td style="padding:9px 12px"><button class="btn btn-sm" onclick="editarBaja('${s.id}')">Editar motivo</button></td>
+  </tr>`).join("");
+
+  return `<div style="font-size:12px;color:var(--text2);margin-bottom:14px">${bajas.length} servicio(s) de baja</div>
+    <div class="card"><div class="card-header"><h3>Bajas</h3></div>
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
+      <thead><tr style="background:var(--surface2)">
+        <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Consorcio</th>
+        <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">CUIT</th>
+        <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Administración</th>
+        <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Fecha baja</th>
+        <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Motivo</th>
+        <th style="padding:8px 12px"></th>
+      </tr></thead>
+      <tbody>${filas || `<tr><td colspan="6" style="text-align:center;padding:32px;color:var(--text3)">No hay servicios de baja.</td></tr>`}</tbody>
+    </table></div></div>`;
 }
 
 function renderConfig(){
@@ -2308,6 +2484,8 @@ const RENDERERS = {
   prefac: renderPrefac,
   reclamos: renderReclamos,
   comercial: renderComercial,
+  "comercial-bajas": renderComercialBajas,
+  bajas: renderBajas,
   config: renderConfig,
 };
 
