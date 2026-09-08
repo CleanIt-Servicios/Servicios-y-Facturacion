@@ -44,6 +44,7 @@ const APP = {
 const USUARIOS_LOGIN = {
   rrhh:        { nombre: "RRHH",           perfil: "rrhh",        clave: "cleanit2024" },
   facturacion: { nombre: "Facturación",    perfil: "facturacion", clave: "factura2024" },
+  comercial:   { nombre: "Comercial",      perfil: "comercial",   clave: "comercial2024" },
 };
 
 const PERMISOS = {
@@ -62,6 +63,10 @@ const PERMISOS = {
   supervisor: {
     screens: ["servicios","control"],
     editar: false, verValores: false, verFacturacion: false, darBaja: false, configurar: false, verTodo: false,
+  },
+  comercial: {
+    screens: ["comercial"],
+    editar: false, verValores: true, verFacturacion: false, darBaja: false, configurar: false, verTodo: true,
   },
 };
 
@@ -269,7 +274,7 @@ function intentarLogin(){
   APP.auth.supervisorId = usr.supervisorId || null;
   sessionStorage.setItem("cleanit_v2_sesion", JSON.stringify(APP.auth));
 
-  APP.screen = usr.perfil === "facturacion" ? "prefac" : "servicios";
+  APP.screen = PERMISOS[usr.perfil].screens[0];
   render();
 }
 
@@ -301,6 +306,7 @@ const SCREENS = {
   movimientos:  { titulo: "Movimientos",      icono: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" },
   prefac:       { titulo: "Prefacturación",   icono: "M9 7h6m-6 4h6m-6 4h4m-8 4h12a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z" },
   reclamos:     { titulo: "Reclamos",         icono: "M12 9v2m0 4h.01M5 19h14a2 2 0 001.84-2.75L13.74 4a2 2 0 00-3.5 0L3.16 16.25A2 2 0 005 19z" },
+  comercial:    { titulo: "Comercial",        icono: "M3 3v18h18M18 17V9M13 17V5M8 17v-3" },
   config:       { titulo: "Configuración",    icono: "M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" },
 };
 
@@ -308,6 +314,7 @@ const NAV_GROUPS = [
   { label: "Operaciones", items: ["servicios","distribucion","control"] },
   { label: "Personal",    items: ["operarios","personal"] },
   { label: "Gestión",     items: ["movimientos","prefac","reclamos"] },
+  { label: "Comercial",   items: ["comercial"] },
   { label: "Sistema",     items: ["config"] },
 ];
 
@@ -436,7 +443,7 @@ let FORM_SVC = null;
 function nuevoServicio(){
   FORM_SVC = {
     id: null,
-    nombre:"", tipo:"Consorcio", cuit:"", mail:"", razonSocial:"",
+    nombre:"", tipo:"Consorcio", cuit:"", mail:"", telefono:"", contacto:"", razonSocial:"",
     supervisorId:"", fechaInicio: hoyISO(),
     // facturación
     valorHora:0, tipoFactura:"A", tipoContrato:"horas", montoFijo:0,
@@ -454,7 +461,7 @@ function editarServicio(id){
   const dist = distDe(id);
   FORM_SVC = {
     id: s.id,
-    nombre: s.nombre, tipo: s.tipo||"Consorcio", cuit: s.cuit||"", mail: s.mail||"", razonSocial: s.razonSocial||"",
+    nombre: s.nombre, tipo: s.tipo||"Consorcio", cuit: s.cuit||"", mail: s.mail||"", telefono: s.telefono||"", contacto: s.contacto||"", razonSocial: s.razonSocial||"",
     supervisorId: s.supervisorId||"", fechaInicio: s.fechaInicio||"",
     valorHora: fac.valorHora||0, tipoFactura: fac.tipoFactura||"A",
     tipoContrato: fac.tipoContrato||"horas", montoFijo: fac.montoFijo||0,
@@ -582,6 +589,10 @@ function renderFormSvc(){
       ${campo("Razón social","svc-razon",f.razonSocial,"text","")}
       ${campo("Mail","svc-mail",f.mail,"email","")}
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        ${campo("Teléfono","svc-telefono",f.telefono,"text","11-1234-5678")}
+        ${campo("Administración / contacto","svc-contacto",f.contacto,"text","Nombre del administrador")}
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div><label style="font-size:11px;font-weight:600;color:var(--text2);display:block;margin-bottom:5px;text-transform:uppercase;letter-spacing:0.5px">Supervisor</label>
           <select id="svc-supervisor" ${dis} style="width:100%;padding:9px 12px;border:1px solid var(--border2);border-radius:var(--radius);font-size:13px">
             <option value="">— Sin asignar —</option>${supsOpts}
@@ -654,6 +665,8 @@ function sincronizarFormDesdeDOM(){
   if(g("svc-mail")) FORM_SVC.mail = g("svc-mail").value.trim();
   if(g("svc-supervisor")) FORM_SVC.supervisorId = g("svc-supervisor").value;
   if(g("svc-fechaInicio")) FORM_SVC.fechaInicio = g("svc-fechaInicio").value;
+  if(g("svc-telefono")) FORM_SVC.telefono = g("svc-telefono").value.trim();
+  if(g("svc-contacto")) FORM_SVC.contacto = g("svc-contacto").value.trim();
   if(g("svc-tipoFactura")) FORM_SVC.tipoFactura = g("svc-tipoFactura").value;
   if(g("svc-valorHora")) FORM_SVC.valorHora = parseFloat(g("svc-valorHora").value)||0;
   if(g("svc-montoFijo")) FORM_SVC.montoFijo = parseFloat(g("svc-montoFijo").value)||0;
@@ -675,12 +688,13 @@ function guardarServicio(){
   if(svcId){
     // Actualizar servicio existente — cada hoja por separado
     APP.servicios = APP.servicios.map(s => s.id===svcId
-      ? {...s, nombre:f.nombre, tipo:f.tipo, cuit:f.cuit, mail:f.mail, razonSocial:f.razonSocial, supervisorId:f.supervisorId, fechaInicio:f.fechaInicio}
+      ? {...s, nombre:f.nombre, tipo:f.tipo, cuit:f.cuit, mail:f.mail, telefono:f.telefono, contacto:f.contacto, razonSocial:f.razonSocial, supervisorId:f.supervisorId, fechaInicio:f.fechaInicio}
       : s);
   } else {
     svcId = nuevoId("S");
     APP.servicios.push({
       id: svcId, nombre:f.nombre, tipo:f.tipo, cuit:f.cuit, mail:f.mail,
+      telefono:f.telefono, contacto:f.contacto,
       razonSocial:f.razonSocial, supervisorId:f.supervisorId, fechaInicio:f.fechaInicio,
       estado:"activo", fechaBaja:"", motivoBaja:"",
     });
@@ -1952,6 +1966,79 @@ function eliminarReclamo(id){
   render();
 }
 
+// ============================================================
+// COMERCIAL — vista de todos los servicios con datos de contacto
+// ============================================================
+// Calcula las horas semanales de un servicio sumando todos sus turnos
+function horasSemanales(svcId){
+  const dist = distDe(svcId);
+  let total = 0;
+  (dist.turnos||[]).forEach(t => {
+    (t.dias||[]).forEach(dw => {
+      const hd = horarioDia(t, dw);
+      total += hsEntreHorarios(hd.entrada, hd.salida);
+    });
+  });
+  return total;
+}
+
+function renderComercial(){
+  const svcs = APP.servicios.filter(s => s.estado==="activo")
+    .sort((a,b)=>a.nombre.localeCompare(b.nombre,"es"));
+  const verVal = tienePermiso("verValores");
+
+  const filas = svcs.map(s => {
+    const fac = facDe(s.id);
+    const hsSem = horasSemanales(s.id);
+    return `<tr>
+      <td style="padding:9px 12px;font-size:12px"><strong>${s.nombre}</strong></td>
+      <td style="padding:9px 12px;font-family:monospace;font-size:11px">${s.cuit||"—"}</td>
+      <td style="padding:9px 12px;font-size:11px;color:var(--text2)">${s.mail||"—"}</td>
+      <td style="padding:9px 12px;font-size:11px">${s.telefono||"—"}</td>
+      <td style="padding:9px 12px;font-size:11px">${s.contacto||"—"}</td>
+      <td style="padding:9px 12px;font-family:monospace;font-size:11px;text-align:right">${fmtHoras(hsSem)}</td>
+      ${verVal?`<td style="padding:9px 12px;font-family:monospace;font-size:11px;text-align:right">${fac.tipoContrato==="fijo"?"Fijo: "+fmtMoneda(fac.montoFijo||0):fmtMoneda(fac.valorHora||0)}</td>`:""}
+    </tr>`;
+  }).join("");
+
+  return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <div style="font-size:12px;color:var(--text2)">${svcs.length} consorcio(s) activo(s)</div>
+      <button class="btn" onclick="descargarComercial()">⬇️ Descargar Excel</button>
+    </div>
+    <div class="card"><div class="card-header"><h3>Cartera comercial</h3></div>
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
+      <thead><tr style="background:var(--surface2)">
+        <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Consorcio</th>
+        <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">CUIT</th>
+        <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Mail</th>
+        <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Teléfono</th>
+        <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Administración</th>
+        <th style="text-align:right;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Hs sem.</th>
+        ${verVal?`<th style="text-align:right;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Valor hora</th>`:""}
+      </tr></thead>
+      <tbody>${filas || `<tr><td colspan="7" style="text-align:center;padding:32px;color:var(--text3)">No hay consorcios cargados.</td></tr>`}</tbody>
+    </table></div></div>`;
+}
+
+function descargarComercial(){
+  const svcs = APP.servicios.filter(s => s.estado==="activo")
+    .sort((a,b)=>a.nombre.localeCompare(b.nombre,"es"));
+  const verVal = tienePermiso("verValores");
+  let lineas = [];
+  lineas.push("Cartera comercial;"+new Date().toLocaleDateString("es-AR"));
+  lineas.push("");
+  lineas.push("Consorcio;CUIT;Mail;Teléfono;Administración;Horas semanales" + (verVal?";Valor hora":""));
+  svcs.forEach(s => {
+    const fac = facDe(s.id);
+    const hsSem = horasSemanales(s.id);
+    const vh = verVal ? (fac.tipoContrato==="fijo" ? "Fijo "+Math.round(fac.montoFijo||0) : Math.round(fac.valorHora||0)) : "";
+    lineas.push([
+      s.nombre, s.cuit||"", s.mail||"", s.telefono||"", s.contacto||"", fmtHoras(hsSem)
+    ].concat(verVal?[vh]:[]).join(";"));
+  });
+  descargarCSV(lineas, `Cartera_comercial_${new Date().toISOString().slice(0,10)}.csv`);
+}
+
 function renderConfig(){
   return `
     <div class="card"><div class="card-header"><h3>📥 Importar servicios desde backup</h3></div>
@@ -2138,6 +2225,7 @@ const RENDERERS = {
   movimientos: renderMovimientos,
   prefac: renderPrefac,
   reclamos: renderReclamos,
+  comercial: renderComercial,
   config: renderConfig,
 };
 
