@@ -445,7 +445,7 @@ let FORM_SVC = null;
 function nuevoServicio(){
   FORM_SVC = {
     id: null,
-    nombre:"", tipo:"Consorcio", cuit:"", mail:"", telefono:"", contacto:"", razonSocial:"",
+    nombre:"", tipo:"Consorcio", cuit:"", mail:"", telefono:"", contacto:"", razonSocial:"", materiales:"sin",
     supervisorId:"", fechaInicio: hoyISO(),
     // facturación
     valorHora:0, tipoFactura:"A", tipoContrato:"horas", montoFijo:0,
@@ -463,7 +463,7 @@ function editarServicio(id){
   const dist = distDe(id);
   FORM_SVC = {
     id: s.id,
-    nombre: s.nombre, tipo: s.tipo||"Consorcio", cuit: s.cuit||"", mail: s.mail||"", telefono: s.telefono||"", contacto: s.contacto||"", razonSocial: s.razonSocial||"",
+    nombre: s.nombre, tipo: s.tipo||"Consorcio", cuit: s.cuit||"", mail: s.mail||"", telefono: s.telefono||"", contacto: s.contacto||"", razonSocial: s.razonSocial||"", materiales: s.materiales||"sin",
     supervisorId: s.supervisorId||"", fechaInicio: s.fechaInicio||"",
     valorHora: fac.valorHora||0, tipoFactura: fac.tipoFactura||"A",
     tipoContrato: fac.tipoContrato||"horas", montoFijo: fac.montoFijo||0,
@@ -594,6 +594,12 @@ function renderFormSvc(){
         ${campo("Teléfono","svc-telefono",f.telefono,"text","11-1234-5678")}
         ${campo("Administración / contacto","svc-contacto",f.contacto,"text","Nombre del administrador")}
       </div>
+      <div style="margin-bottom:0"><label style="font-size:11px;font-weight:600;color:var(--text2);display:block;margin-bottom:5px;text-transform:uppercase;letter-spacing:0.5px">Materiales</label>
+        <select id="svc-materiales" ${dis} style="width:100%;padding:9px 12px;border:1px solid var(--border2);border-radius:var(--radius);font-size:13px">
+          <option value="sin" ${f.materiales==="sin"?"selected":""}>Sin materiales</option>
+          <option value="con" ${f.materiales==="con"?"selected":""}>Con materiales</option>
+        </select>
+      </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div><label style="font-size:11px;font-weight:600;color:var(--text2);display:block;margin-bottom:5px;text-transform:uppercase;letter-spacing:0.5px">Supervisor</label>
           <select id="svc-supervisor" ${dis} style="width:100%;padding:9px 12px;border:1px solid var(--border2);border-radius:var(--radius);font-size:13px">
@@ -669,6 +675,7 @@ function sincronizarFormDesdeDOM(){
   if(g("svc-fechaInicio")) FORM_SVC.fechaInicio = g("svc-fechaInicio").value;
   if(g("svc-telefono")) FORM_SVC.telefono = g("svc-telefono").value.trim();
   if(g("svc-contacto")) FORM_SVC.contacto = g("svc-contacto").value.trim();
+  if(g("svc-materiales")) FORM_SVC.materiales = g("svc-materiales").value;
   if(g("svc-tipoFactura")) FORM_SVC.tipoFactura = g("svc-tipoFactura").value;
   if(g("svc-valorHora")) FORM_SVC.valorHora = parseFloat(g("svc-valorHora").value)||0;
   if(g("svc-montoFijo")) FORM_SVC.montoFijo = parseFloat(g("svc-montoFijo").value)||0;
@@ -690,13 +697,13 @@ function guardarServicio(){
   if(svcId){
     // Actualizar servicio existente — cada hoja por separado
     APP.servicios = APP.servicios.map(s => s.id===svcId
-      ? {...s, nombre:f.nombre, tipo:f.tipo, cuit:f.cuit, mail:f.mail, telefono:f.telefono, contacto:f.contacto, razonSocial:f.razonSocial, supervisorId:f.supervisorId, fechaInicio:f.fechaInicio}
+      ? {...s, nombre:f.nombre, tipo:f.tipo, cuit:f.cuit, mail:f.mail, telefono:f.telefono, contacto:f.contacto, materiales:f.materiales, razonSocial:f.razonSocial, supervisorId:f.supervisorId, fechaInicio:f.fechaInicio}
       : s);
   } else {
     svcId = nuevoId("S");
     APP.servicios.push({
       id: svcId, nombre:f.nombre, tipo:f.tipo, cuit:f.cuit, mail:f.mail,
-      telefono:f.telefono, contacto:f.contacto,
+      telefono:f.telefono, contacto:f.contacto, materiales:f.materiales,
       razonSocial:f.razonSocial, supervisorId:f.supervisorId, fechaInicio:f.fechaInicio,
       estado:"activo", fechaBaja:"", motivoBaja:"",
     });
@@ -2049,6 +2056,7 @@ function renderComercial(){
       <td style="padding:9px 12px;font-size:11px;color:var(--text2)">${s.mail||"—"}</td>
       <td style="padding:9px 12px;font-size:11px">${s.telefono||"—"}</td>
       <td style="padding:9px 12px;font-size:11px">${s.contacto||"—"}</td>
+      <td style="padding:9px 12px;font-size:11px">${s.materiales==="con"?'<span style="background:var(--green-bg);color:var(--green-txt);padding:2px 8px;border-radius:20px;font-size:10px">Con</span>':'<span style="color:var(--text3)">Sin</span>'}</td>
       <td style="padding:9px 12px;font-family:monospace;font-size:11px;text-align:right">${fmtHoras(hsSem)}</td>
       ${tdVal(fac)}
       ${tdFact(s.id)}
@@ -2061,6 +2069,7 @@ function renderComercial(){
         <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Mail</th>
         <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Teléfono</th>
         <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Administración</th>
+        <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Materiales</th>
         <th style="text-align:right;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Hs sem.</th>
         ${thVal}
         ${thFact}
@@ -2120,13 +2129,13 @@ function descargarComercial(){
   let lineas = [];
   lineas.push("Cartera comercial;"+new Date().toLocaleDateString("es-AR"));
   lineas.push("");
-  const header = "Consorcio;CUIT;Mail;Teléfono;Administración;Horas semanales" + (verVal?`;Valor hora;Subtotal ${MESES[mAnt]}`:"");
+  const header = "Consorcio;CUIT;Mail;Teléfono;Administración;Materiales;Horas semanales" + (verVal?`;Valor hora;Subtotal ${MESES[mAnt]}`:"");
   const filaDe = (s) => {
     const fac = facDe(s.id);
     const hsSem = horasSemanales(s.id);
     const vh = verVal ? (fac.tipoContrato==="fijo" ? "Fijo "+Math.round(fac.montoFijo||0) : Math.round(fac.valorHora||0)) : "";
     const sub = verVal ? Math.round(subtotalPlano(s.id, yAnt, mAnt)) : "";
-    return [s.nombre, s.cuit||"", s.mail||"", s.telefono||"", s.contacto||"", fmtHoras(hsSem)].concat(verVal?[vh, sub]:[]).join(";");
+    return [s.nombre, s.cuit||"", s.mail||"", s.telefono||"", s.contacto||"", s.materiales==="con"?"Con":"Sin", fmtHoras(hsSem)].concat(verVal?[vh, sub]:[]).join(";");
   };
 
   if(COMERCIAL_VISTA === "admin"){
