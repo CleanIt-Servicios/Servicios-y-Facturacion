@@ -24,6 +24,7 @@ const APP = {
   distribucion: [],   // hoja 5  (1 fila por servicio, con array de turnos)
   movimientos: [],    // hoja 8
   reclamos: [],       // hoja 9  (reclamos de facturación)
+  cobranzas: [],      // hoja 10 (facturas de Xubio + cobros)
 
   // --- Auth ---
   auth: {
@@ -49,11 +50,11 @@ const USUARIOS_LOGIN = {
 
 const PERMISOS = {
   rrhh: {
-    screens: ["servicios","bajas","operarios","personal","distribucion","control","movimientos","prefac","reclamos","config"],
+    screens: ["servicios","bajas","operarios","personal","distribucion","control","movimientos","prefac","cobranzas","reclamos","config"],
     editar: true, verValores: true, verFacturacion: true, darBaja: true, configurar: true, verTodo: true,
   },
   facturacion: {
-    screens: ["servicios","prefac","movimientos","reclamos"],
+    screens: ["servicios","prefac","cobranzas","movimientos","reclamos","comercial","comercial-bajas"],
     editar: false, verValores: true, verFacturacion: true, darBaja: false, configurar: false, verTodo: true,
   },
   jefe: {
@@ -102,6 +103,7 @@ function guardarLocal(){
       distribucion: APP.distribucion,
       movimientos: APP.movimientos,
       reclamos: APP.reclamos,
+      cobranzas: APP.cobranzas,
       contadores: APP.contadores,
     }));
   }catch(e){ console.error("Error guardando local:", e); }
@@ -119,6 +121,7 @@ function cargarLocal(){
     APP.distribucion = d.distribucion || [];
     APP.movimientos  = d.movimientos  || [];
     APP.reclamos     = d.reclamos     || [];
+    APP.cobranzas    = d.cobranzas    || [];
     APP.contadores   = d.contadores   || { S:0, O:0, P:0, M:0, R:0 };
     return true;
   }catch(e){ console.error("Error cargando local:", e); return false; }
@@ -139,6 +142,7 @@ async function cargarDeDrive(){
       APP.distribucion = data.distribucion || [];
       APP.movimientos  = (data.movimientos || []).map(normalizarMovimiento);
       APP.reclamos     = data.reclamos || [];
+      APP.cobranzas    = data.cobranzas || [];
       // Recalcular contadores desde los IDs existentes (para no repetir)
       recalcularContadores();
       guardarLocal();
@@ -241,6 +245,39 @@ async function driveDeleteReclamo(id){
   }catch(e){ console.error(e); }
 }
 
+// Guarda una factura de cobranza (upsert por número de factura = id)
+async function driveSaveCobranza(id){
+  if(!driveActivo()) return;
+  const c = APP.cobranzas.find(x => x.id === id);
+  if(!c) return;
+  try{
+    await fetch(SCRIPT_URL, { method:"POST", body: JSON.stringify({ action:"upsertCobranza", cobranza:c })});
+  }catch(e){ console.error(e); }
+}
+
+// Guarda muchas facturas de cobranza de una (para la importación del Excel)
+async function driveSaveCobranzasBulk(lista){
+  if(!driveActivo()) return {ok:0, fail:0};
+  let ok=0, fail=0;
+  for(let i=0; i<lista.length; i++){
+    showLoading(`💾 Guardando factura ${i+1}/${lista.length}...`);
+    try{
+      const resp = await fetch(SCRIPT_URL, { method:"POST", body: JSON.stringify({ action:"upsertCobranza", cobranza:lista[i] })});
+      const d = await resp.json();
+      d.ok ? ok++ : fail++;
+    }catch(e){ fail++; }
+  }
+  hideLoading();
+  return {ok, fail};
+}
+
+async function driveDeleteCobranza(id){
+  if(!driveActivo()) return;
+  try{
+    await fetch(SCRIPT_URL, { method:"POST", body: JSON.stringify({ action:"deleteCobranza", id:id })});
+  }catch(e){ console.error(e); }
+}
+
 // ============================================================
 // AUTH
 // ============================================================
@@ -305,6 +342,7 @@ const SCREENS = {
   control:      { titulo: "Control de horas", icono: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" },
   movimientos:  { titulo: "Movimientos",      icono: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" },
   prefac:       { titulo: "Prefacturación",   icono: "M9 7h6m-6 4h6m-6 4h4m-8 4h12a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z" },
+  cobranzas:    { titulo: "Cobranzas",        icono: "M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" },
   reclamos:     { titulo: "Reclamos",         icono: "M12 9v2m0 4h.01M5 19h14a2 2 0 001.84-2.75L13.74 4a2 2 0 00-3.5 0L3.16 16.25A2 2 0 005 19z" },
   comercial:    { titulo: "Comercial",        icono: "M3 3v18h18M18 17V9M13 17V5M8 17v-3" },
   bajas:        { titulo: "Bajas",             icono: "M18 6L6 18M6 6l12 12" },
@@ -315,7 +353,7 @@ const SCREENS = {
 const NAV_GROUPS = [
   { label: "Operaciones", items: ["servicios","bajas","distribucion","control"] },
   { label: "Personal",    items: ["operarios","personal"] },
-  { label: "Gestión",     items: ["movimientos","prefac","reclamos"] },
+  { label: "Gestión",     items: ["movimientos","prefac","cobranzas","reclamos"] },
   { label: "Comercial",   items: ["comercial","comercial-bajas"] },
   { label: "Sistema",     items: ["config"] },
 ];
@@ -2316,6 +2354,162 @@ function renderComercialBajas(){
     </table></div></div>`;
 }
 
+// ============================================================
+// COBRANZAS — facturas de Xubio + cobros
+// ============================================================
+// Calcula el tiempo vencido desde la fecha de vencimiento hasta hoy
+function tiempoVencido(fechaVto){
+  if(!fechaVto) return { dias:0, texto:"—", vencido:false };
+  const vto = new Date(fechaVto + "T00:00:00");
+  if(isNaN(vto.getTime())) return { dias:0, texto:"—", vencido:false };
+  const hoy = new Date(); hoy.setHours(0,0,0,0);
+  const dias = Math.floor((hoy - vto) / (1000*60*60*24));
+  if(dias < 0) return { dias, texto:`faltan ${-dias}d`, vencido:false };
+  if(dias === 0) return { dias, texto:"vence hoy", vencido:false };
+  if(dias < 30) return { dias, texto:`${dias} días`, vencido:true };
+  const meses = Math.floor(dias/30);
+  return { dias, texto:`${meses} ${meses===1?"mes":"meses"}`, vencido:true };
+}
+
+// Normaliza una fecha que puede venir como Date, número de Excel o string
+function fechaExcel(v){
+  if(!v) return "";
+  if(v instanceof Date) return isoFecha(v.getFullYear(), v.getMonth(), v.getDate());
+  if(typeof v === "number"){
+    // Excel: días desde 1899-12-30
+    const d = new Date(Math.round((v - 25569) * 86400 * 1000));
+    return isoFecha(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  }
+  const s = String(v).trim();
+  if(s.includes("T")){ const d=new Date(s); if(!isNaN(d.getTime())) return isoFecha(d.getFullYear(),d.getMonth(),d.getDate()); }
+  return s.slice(0,10);
+}
+
+function renderCobranzas(){
+  const cobranzas = APP.cobranzas.slice()
+    .sort((a,b) => (a.fechaVto||"").localeCompare(b.fechaVto||""));
+
+  const totalDeuda = cobranzas.reduce((a,c) => a + (Number(c.importe)||0), 0);
+
+  const filas = cobranzas.map(c => {
+    const tv = tiempoVencido(c.fechaVto);
+    return `<tr>
+      <td style="padding:8px 12px;font-family:monospace;font-size:11px">${(c.fechaEmision||"").split("-").reverse().join("/")}</td>
+      <td style="padding:8px 12px;font-family:monospace;font-size:10px;color:var(--text2)">${c.id}</td>
+      <td style="padding:8px 12px;font-family:monospace;font-size:11px">${(c.fechaVto||"").split("-").reverse().join("/")}</td>
+      <td style="padding:8px 12px;font-size:12px"><strong>${c.cliente||"—"}</strong></td>
+      <td style="padding:8px 12px;font-size:11px;color:var(--text3)">${c.administracion||"Sin administración"}</td>
+      <td style="padding:8px 12px;font-family:monospace;font-size:11px;text-align:right">${fmtMoneda(c.importe||0)}${c.importe2&&c.importe2!==c.importe?`<br><span style="color:var(--amber-txt);font-size:10px">alt: ${fmtMoneda(c.importe2)}</span>`:""}</td>
+      <td style="padding:8px 12px;font-size:10px;color:var(--text3);max-width:180px">${c.descripcion||""}</td>
+      <td style="padding:8px 12px;text-align:center">${c.cobrado?'<span style="color:var(--green-txt)">✓</span>':'<span style="color:var(--text3)">—</span>'}</td>
+      <td style="padding:8px 12px;font-size:11px;text-align:right;color:${tv.vencido?'var(--red-txt)':'var(--text2)'}">${tv.texto}</td>
+    </tr>`;
+  }).join("");
+
+  return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <div style="display:flex;align-items:center;gap:14px">
+        <div style="font-size:12px;color:var(--text2)">${cobranzas.length} factura(s)</div>
+        <div style="font-size:12px;color:var(--text2)">Deuda total: <strong style="color:var(--primary)">${fmtMoneda(totalDeuda)}</strong></div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <input type="file" id="xubio-file" accept=".xlsx,.xls" style="display:none" onchange="procesarExcelXubio(this)">
+        <button class="btn btn-primary" onclick="document.getElementById('xubio-file').click()">📥 Subir Excel de Xubio</button>
+      </div>
+    </div>
+    <div id="cobranza-status" style="font-size:12px;color:var(--text2);margin-bottom:12px"></div>
+    <div class="card"><div class="card-header"><h3>Cuentas a cobrar</h3></div>
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
+      <thead><tr style="background:var(--surface2)">
+        <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Emisión</th>
+        <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">N° Factura</th>
+        <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Vencimiento</th>
+        <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Cliente</th>
+        <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Administración</th>
+        <th style="text-align:right;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Importe</th>
+        <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Descripción</th>
+        <th style="text-align:center;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Pago</th>
+        <th style="text-align:right;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Vencido</th>
+      </tr></thead>
+      <tbody>${filas || `<tr><td colspan="9" style="text-align:center;padding:32px;color:var(--text3)">No hay facturas cargadas. Subí el Excel de Xubio para empezar.</td></tr>`}</tbody>
+    </table></div></div>`;
+}
+
+// Lee el Excel de Xubio y carga las facturas
+async function procesarExcelXubio(input){
+  if(!input.files.length) return;
+  const status = document.getElementById("cobranza-status");
+  status.textContent = "Leyendo archivo...";
+  try{
+    const file = input.files[0];
+    const data = await file.arrayBuffer();
+    const wb = XLSX.read(data, { cellDates:true });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const filas = XLSX.utils.sheet_to_json(ws, { header:1 });
+
+    // Buscar la fila de headers (la que tiene "Documento" o "Cliente")
+    let headerRow = 0;
+    for(let i=0; i<Math.min(5, filas.length); i++){
+      const row = filas[i].map(x => String(x||"").toLowerCase());
+      if(row.some(x => x.includes("documento")) || row.some(x => x.includes("cliente"))){ headerRow = i; break; }
+    }
+    const headers = filas[headerRow].map(x => String(x||"").trim().toLowerCase());
+    const col = (busca) => headers.findIndex(h => h.includes(busca));
+    const iFecha = col("fecha"), iVto = headers.findIndex(h=>h.includes("vto")||h.includes("vencimiento")&&h.includes("fecha"));
+    const iDoc = col("documento"), iCli = col("cliente");
+    const iImp1 = headers.findIndex(h=>h.includes("transacc")), iImp2 = headers.findIndex(h=>h.includes("ppal"));
+    const iDesc = col("descripción")>=0?col("descripción"):col("descripcion");
+
+    // Fecha emisión: primera col "fecha" que no sea la de vto
+    const iFechaEmision = headers.findIndex((h,idx)=>h.includes("fecha") && idx!==iVto);
+
+    const nuevas = [];
+    for(let i=headerRow+1; i<filas.length; i++){
+      const row = filas[i];
+      if(!row || !row.length) continue;
+      const numFactura = String(row[iDoc]||"").trim();
+      if(!numFactura) continue;
+      const imp1 = Number(row[iImp1])||0;
+      const imp2 = iImp2>=0 ? (Number(row[iImp2])||0) : imp1;
+      nuevas.push({
+        id: numFactura,                      // el número de factura es la llave única
+        fechaEmision: fechaExcel(row[iFechaEmision>=0?iFechaEmision:iFecha]),
+        fechaVto: fechaExcel(row[iVto]),
+        cliente: String(row[iCli]||"").trim(),
+        administracion: "",                  // el match se resuelve después
+        importe: imp1,
+        importe2: imp2,
+        descripcion: String(row[iDesc]||"").trim(),
+        cobrado: false,
+        montoCobrado: 0,
+      });
+    }
+
+    if(!nuevas.length){ status.textContent = "⚠️ No se encontraron facturas en el archivo. Revisá el formato."; input.value=""; return; }
+
+    // CRUCE: preservar los cobros ya marcados de las facturas que siguen
+    const cobradosPrevios = {};
+    APP.cobranzas.forEach(c => { if(c.cobrado || c.montoCobrado) cobradosPrevios[c.id] = { cobrado:c.cobrado, montoCobrado:c.montoCobrado }; });
+
+    nuevas.forEach(n => {
+      if(cobradosPrevios[n.id]){
+        n.cobrado = cobradosPrevios[n.id].cobrado;
+        n.montoCobrado = cobradosPrevios[n.id].montoCobrado;
+      }
+    });
+
+    APP.cobranzas = nuevas;
+    guardarLocal();
+    render();
+    status.textContent = `✅ ${nuevas.length} factura(s) cargadas. Guardando en Drive...`;
+    const r = await driveSaveCobranzasBulk(nuevas);
+    document.getElementById("cobranza-status").textContent = `✅ ${nuevas.length} factura(s) cargadas · guardadas en Drive: ${r.ok} · errores: ${r.fail}`;
+  }catch(e){
+    console.error(e);
+    status.textContent = "❌ Error al leer el archivo: " + e.message;
+  }
+  input.value = "";
+}
+
 function renderConfig(){
   return `
     <div class="card"><div class="card-header"><h3>📥 Importar servicios desde backup</h3></div>
@@ -2501,6 +2695,7 @@ const RENDERERS = {
   control: renderControl,
   movimientos: renderMovimientos,
   prefac: renderPrefac,
+  cobranzas: renderCobranzas,
   reclamos: renderReclamos,
   comercial: renderComercial,
   "comercial-bajas": renderComercialBajas,
