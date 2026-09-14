@@ -2389,27 +2389,50 @@ function renderCobranzas(){
   const cobranzas = APP.cobranzas.slice()
     .sort((a,b) => (a.fechaVto||"").localeCompare(b.fechaVto||""));
 
-  const totalDeuda = cobranzas.reduce((a,c) => a + (Number(c.importe)||0), 0);
+  // Totales
+  const totalFacturado = cobranzas.reduce((a,c) => a + (Number(c.importe)||0), 0);
+  const totalCobrado = cobranzas.reduce((a,c) => a + (Number(c.montoCobrado)||0), 0);
+  const totalPendiente = totalFacturado - totalCobrado;
 
   const filas = cobranzas.map(c => {
     const tv = tiempoVencido(c.fechaVto);
-    return `<tr>
+    const imp = Number(c.importe)||0;
+    const cob = Number(c.montoCobrado)||0;
+    const saldo = imp - cob;
+    // Estado visual del pago
+    let estadoPago;
+    if(saldo <= 0 && imp > 0) estadoPago = `<span style="background:var(--green-bg);color:var(--green-txt);font-size:10px;padding:2px 8px;border-radius:20px">Cobrado</span>`;
+    else if(cob > 0) estadoPago = `<span style="background:var(--amber-bg);color:var(--amber-txt);font-size:10px;padding:2px 8px;border-radius:20px">Parcial</span><br><span style="font-size:10px;color:var(--text3)">falta ${fmtMoneda(saldo)}</span>`;
+    else estadoPago = `<span style="color:var(--text3);font-size:11px">Pendiente</span>`;
+
+    return `<tr style="${saldo<=0&&imp>0?'opacity:0.6':''}">
       <td style="padding:8px 12px;font-family:monospace;font-size:11px">${(c.fechaEmision||"").split("-").reverse().join("/")}</td>
       <td style="padding:8px 12px;font-family:monospace;font-size:10px;color:var(--text2)">${c.id}</td>
       <td style="padding:8px 12px;font-family:monospace;font-size:11px">${(c.fechaVto||"").split("-").reverse().join("/")}</td>
       <td style="padding:8px 12px;font-size:12px"><strong>${c.cliente||"—"}</strong></td>
       <td style="padding:8px 12px;font-size:11px;color:var(--text3)">${c.administracion||"Sin administración"}</td>
-      <td style="padding:8px 12px;font-family:monospace;font-size:11px;text-align:right">${fmtMoneda(c.importe||0)}${c.importe2&&c.importe2!==c.importe?`<br><span style="color:var(--amber-txt);font-size:10px">alt: ${fmtMoneda(c.importe2)}</span>`:""}</td>
-      <td style="padding:8px 12px;font-size:10px;color:var(--text3);max-width:180px">${c.descripcion||""}</td>
-      <td style="padding:8px 12px;text-align:center">${c.cobrado?'<span style="color:var(--green-txt)">✓</span>':'<span style="color:var(--text3)">—</span>'}</td>
-      <td style="padding:8px 12px;font-size:11px;text-align:right;color:${tv.vencido?'var(--red-txt)':'var(--text2)'}">${tv.texto}</td>
+      <td style="padding:8px 12px;font-family:monospace;font-size:11px;text-align:right">${fmtMoneda(imp)}${c.importe2&&c.importe2!==c.importe?`<br><span style="color:var(--amber-txt);font-size:10px">alt: ${fmtMoneda(c.importe2)}</span>`:""}</td>
+      <td style="padding:8px 12px;font-size:10px;color:var(--text3);max-width:160px">${c.descripcion||""}</td>
+      <td style="padding:8px 12px;text-align:center">${estadoPago}</td>
+      <td style="padding:8px 12px;font-size:11px;text-align:right;color:${tv.vencido&&saldo>0?'var(--red-txt)':'var(--text2)'}">${saldo>0?tv.texto:"—"}</td>
+      <td style="padding:8px 12px;text-align:center"><button class="btn btn-sm" onclick="abrirCobro('${c.id}')" style="font-size:11px;padding:3px 8px">Registrar</button></td>
     </tr>`;
   }).join("");
 
-  return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-      <div style="display:flex;align-items:center;gap:14px">
-        <div style="font-size:12px;color:var(--text2)">${cobranzas.length} factura(s)</div>
-        <div style="font-size:12px;color:var(--text2)">Deuda total: <strong style="color:var(--primary)">${fmtMoneda(totalDeuda)}</strong></div>
+  return `<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px">
+      <div style="display:flex;gap:12px">
+        <div class="card" style="margin:0;padding:14px 20px;min-width:180px">
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px">Deuda pendiente</div>
+          <div style="font-size:30px;font-weight:600;color:var(--red-txt);line-height:1.2">${fmtMoneda(totalPendiente)}</div>
+        </div>
+        <div class="card" style="margin:0;padding:14px 20px;min-width:150px">
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px">Cobrado</div>
+          <div style="font-size:30px;font-weight:600;color:var(--green-txt);line-height:1.2">${fmtMoneda(totalCobrado)}</div>
+        </div>
+        <div class="card" style="margin:0;padding:14px 20px;min-width:130px">
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px">Facturas</div>
+          <div style="font-size:30px;font-weight:600;line-height:1.2">${cobranzas.length}</div>
+        </div>
       </div>
       <div style="display:flex;gap:8px">
         <input type="file" id="xubio-file" accept=".xlsx,.xls" style="display:none" onchange="procesarExcelXubio(this)">
@@ -2429,9 +2452,86 @@ function renderCobranzas(){
         <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Descripción</th>
         <th style="text-align:center;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Pago</th>
         <th style="text-align:right;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Vencido</th>
+        <th style="padding:8px 12px"></th>
       </tr></thead>
-      <tbody>${filas || `<tr><td colspan="9" style="text-align:center;padding:32px;color:var(--text3)">No hay facturas cargadas. Subí el Excel de Xubio para empezar.</td></tr>`}</tbody>
+      <tbody>${filas || `<tr><td colspan="10" style="text-align:center;padding:32px;color:var(--text3)">No hay facturas cargadas. Subí el Excel de Xubio para empezar.</td></tr>`}</tbody>
     </table></div></div>`;
+}
+
+// Modal de registro de cobro (total o parcial)
+function abrirCobro(id){
+  const c = APP.cobranzas.find(x => x.id === id);
+  if(!c) return;
+  const imp = Number(c.importe)||0;
+  const cobrado = Number(c.montoCobrado)||0;
+  const saldo = imp - cobrado;
+  const modal = document.getElementById("modal");
+  modal.innerHTML = `
+    <div class="modal-backdrop" onclick="cerrarModal()"></div>
+    <div class="modal-box">
+      <div class="modal-title">Registrar cobro</div>
+      <div style="background:var(--surface2);border-radius:var(--radius);padding:12px;margin-bottom:16px;font-size:12px">
+        <div style="margin-bottom:4px"><strong>${c.cliente}</strong></div>
+        <div style="color:var(--text2)">Factura ${c.id}</div>
+        <div style="display:flex;justify-content:space-between;margin-top:8px">
+          <span style="color:var(--text2)">Importe total:</span><span style="font-family:monospace">${fmtMoneda(imp)}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between">
+          <span style="color:var(--text2)">Ya cobrado:</span><span style="font-family:monospace">${fmtMoneda(cobrado)}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-weight:600;border-top:0.5px solid var(--border);margin-top:6px;padding-top:6px">
+          <span>Saldo:</span><span style="font-family:monospace;color:${saldo>0?'var(--red-txt)':'var(--green-txt)'}">${fmtMoneda(saldo)}</span>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:14px">
+        <button class="btn" onclick="cobroTotal('${id}')" style="flex:1;justify-content:center">Cobrar todo (${fmtMoneda(saldo)})</button>
+      </div>
+      <div class="modal-field"><label>O registrar monto parcial</label>
+        <input id="cobro-monto" type="number" placeholder="0" value="" style="width:100%;padding:9px 12px;border:1px solid var(--border2);border-radius:var(--radius);font-size:13px">
+        <div style="font-size:11px;color:var(--text3);margin-top:4px">Se suma a lo ya cobrado. Útil cuando pagan parte y queda una retención pendiente.</div>
+      </div>
+      ${cobrado>0?`<div style="margin-bottom:14px"><button class="btn btn-sm" onclick="resetCobro('${id}')" style="color:var(--red-txt);font-size:11px">Deshacer cobros de esta factura</button></div>`:""}
+      <div class="modal-actions">
+        <button class="btn" onclick="cerrarModal()">Cerrar</button>
+        <button class="btn btn-primary" onclick="guardarCobroParcial('${id}')">Guardar parcial</button>
+      </div>
+    </div>`;
+  modal.style.display = "flex";
+}
+
+function cobroTotal(id){
+  const c = APP.cobranzas.find(x => x.id === id);
+  if(!c) return;
+  const imp = Number(c.importe)||0;
+  APP.cobranzas = APP.cobranzas.map(x => x.id===id ? {...x, montoCobrado:imp, cobrado:true} : x);
+  guardarLocal();
+  driveSaveCobranza(id);
+  cerrarModal();
+  render();
+}
+
+function guardarCobroParcial(id){
+  const monto = parseFloat(document.getElementById("cobro-monto").value)||0;
+  if(monto <= 0){ alert("Ingresá un monto mayor a cero"); return; }
+  const c = APP.cobranzas.find(x => x.id === id);
+  if(!c) return;
+  const imp = Number(c.importe)||0;
+  const nuevoCobrado = (Number(c.montoCobrado)||0) + monto;
+  if(nuevoCobrado > imp && !confirm(`El cobro (${fmtMoneda(nuevoCobrado)}) supera el importe de la factura (${fmtMoneda(imp)}). ¿Guardar igual?`)) return;
+  APP.cobranzas = APP.cobranzas.map(x => x.id===id ? {...x, montoCobrado:nuevoCobrado, cobrado:nuevoCobrado>=imp} : x);
+  guardarLocal();
+  driveSaveCobranza(id);
+  cerrarModal();
+  render();
+}
+
+function resetCobro(id){
+  if(!confirm("¿Deshacer todos los cobros de esta factura? Vuelve a quedar pendiente.")) return;
+  APP.cobranzas = APP.cobranzas.map(x => x.id===id ? {...x, montoCobrado:0, cobrado:false} : x);
+  guardarLocal();
+  driveSaveCobranza(id);
+  cerrarModal();
+  render();
 }
 
 // Lee el Excel de Xubio y carga las facturas
