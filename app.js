@@ -313,6 +313,11 @@ function intentarLogin(){
 
   APP.screen = PERMISOS[usr.perfil].screens[0];
   render();
+
+  // Ahora que entró, traer lo último de Drive (ya no molesta al login)
+  if(driveActivo()){
+    cargarDeDrive().then(ok => { if(ok) render(); });
+  }
 }
 
 function cerrarSesion(){
@@ -2431,6 +2436,15 @@ function adminDeFactura(c){
   return "";
 }
 
+let COBRANZA_ORDEN = "vencimiento"; // vencimiento | alfabetico | monto | admin
+
+// Admin efectivo de una factura (manual o auto), para ordenar/agrupar
+function adminEfectivo(c){
+  if(c.administracion && c.administracion.trim()) return c.administracion.trim();
+  if(c._adminAuto && c._adminAuto.trim()) return c._adminAuto.trim();
+  return "Sin administración";
+}
+
 function renderCobranzas(){
   // Aplicar match automático por razón social a las facturas sin administración
   APP.cobranzas.forEach(c => {
@@ -2441,8 +2455,16 @@ function renderCobranzas(){
     }
   });
 
-  const cobranzas = APP.cobranzas.slice()
-    .sort((a,b) => (a.fechaVto||"").localeCompare(b.fechaVto||""));
+  // Ordenar según lo elegido
+  const ordenar = (arr) => {
+    const a = arr.slice();
+    if(COBRANZA_ORDEN === "alfabetico") a.sort((x,y)=>(x.cliente||"").localeCompare(y.cliente||"","es"));
+    else if(COBRANZA_ORDEN === "monto") a.sort((x,y)=>(Number(y.importe)||0)-(Number(x.importe)||0));
+    else a.sort((x,y)=>(x.fechaVto||"").localeCompare(y.fechaVto||"")); // vencimiento (default)
+    return a;
+  };
+
+  const cobranzas = APP.cobranzas.slice();
 
   // Separar alertas del resto
   const alertas = cobranzas.filter(c => c.estadoCruce === "alerta");
@@ -2491,7 +2513,7 @@ function renderCobranzas(){
     </div>`;
   }
 
-  const filas = enDeuda.map(c => {
+  const filaCobranza = (c) => {
     const tv = tiempoVencido(c.fechaVto);
     const imp = Number(c.importe)||0;
     const cob = Number(c.montoCobrado)||0;
@@ -2519,7 +2541,36 @@ function renderCobranzas(){
       <td style="padding:8px 12px;font-size:11px;text-align:right;color:${tv.vencido&&saldo>0?'var(--red-txt)':'var(--text2)'}">${saldo>0?tv.texto:"—"}</td>
       <td style="padding:8px 12px;text-align:center"><button class="btn btn-sm" onclick="abrirCobro('${c.id}')" style="font-size:11px;padding:3px 8px">Registrar</button></td>
     </tr>`;
-  }).join("");
+  };
+
+  // Construir el cuerpo de la tabla según el orden
+  let cuerpoTabla;
+  if(COBRANZA_ORDEN === "admin"){
+    // Agrupado por administrador
+    const grupos = {};
+    enDeuda.forEach(c => {
+      const k = adminEfectivo(c);
+      if(!grupos[k]) grupos[k] = { nombre:k, facturas:[], pendiente:0 };
+      grupos[k].facturas.push(c);
+      grupos[k].pendiente += (Number(c.importe)||0) - (Number(c.montoCobrado)||0);
+    });
+    const ordenados = Object.values(grupos).sort((a,b)=>{
+      if(a.nombre==="Sin administración") return 1;
+      if(b.nombre==="Sin administración") return -1;
+      return a.nombre.localeCompare(b.nombre,"es");
+    });
+    cuerpoTabla = ordenados.map(g => {
+      const filasG = ordenar(g.facturas).map(filaCobranza).join("");
+      return `<tr style="background:var(--surface2)">
+        <td colspan="6" style="padding:8px 12px;font-weight:600;font-size:12px">${g.nombre}</td>
+        <td colspan="4" style="padding:8px 12px;text-align:right;font-size:11px;color:var(--text2)">
+          ${g.facturas.length} factura(s) · pendiente ${fmtMoneda(g.pendiente)}</td>
+      </tr>${filasG}`;
+    }).join("");
+  } else {
+    cuerpoTabla = ordenar(enDeuda).map(filaCobranza).join("");
+  }
+  const filas = cuerpoTabla;
 
   return `${bloqueAlertas}<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px">
       <div style="display:flex;gap:12px">
@@ -2542,7 +2593,17 @@ function renderCobranzas(){
       </div>
     </div>
     <div id="cobranza-status" style="font-size:12px;color:var(--text2);margin-bottom:12px"></div>
-    <div class="card"><div class="card-header"><h3>Cuentas a cobrar</h3>${confirmadas.length?`<span style="font-size:11px;color:var(--text3)">${confirmadas.length} confirmada(s) archivada(s)</span>`:""}</div>
+    <div class="card"><div class="card-header"><h3>Cuentas a cobrar</h3>
+      <div style="display:flex;align-items:center;gap:10px">
+        ${confirmadas.length?`<span style="font-size:11px;color:var(--text3)">${confirmadas.length} confirmada(s) archivada(s)</span>`:""}
+        <span style="font-size:11px;color:var(--text3)">Ordenar:</span>
+        <select onchange="COBRANZA_ORDEN=this.value;render()" style="padding:5px 10px;border:1px solid var(--border2);border-radius:var(--radius);font-size:12px">
+          <option value="vencimiento" ${COBRANZA_ORDEN==="vencimiento"?"selected":""}>Por vencimiento</option>
+          <option value="alfabetico" ${COBRANZA_ORDEN==="alfabetico"?"selected":""}>Alfabético (cliente)</option>
+          <option value="monto" ${COBRANZA_ORDEN==="monto"?"selected":""}>Mayor monto primero</option>
+          <option value="admin" ${COBRANZA_ORDEN==="admin"?"selected":""}>Por administración</option>
+        </select>
+      </div></div>
     <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
       <thead><tr style="background:var(--surface2)">
         <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Emisión</th>
@@ -3098,8 +3159,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   cargarLocal();       // primero lo local (rápido)
   restaurarSesion();
   render();
-  // Después intentar traer lo último de Drive
-  if(driveActivo()){
+  // Solo traer de Drive si ya hay sesión activa (sesión restaurada).
+  // Si está en la pantalla de login, la carga espera a que ingrese
+  // para no pisar el usuario/contraseña que está tipeando.
+  if(driveActivo() && APP.auth.perfil){
     const ok = await cargarDeDrive();
     if(ok) render();
   }
