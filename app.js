@@ -2409,6 +2409,8 @@ function normalizarCobranza(c){
     montoCobrado: Number(c.montoCobrado)||0,
     cobrado: c.cobrado === true || c.cobrado === "TRUE" || c.cobrado === "true",
     estadoCruce: c.estadoCruce || "pendiente",
+    oculta: c.oculta === true || c.oculta === "TRUE" || c.oculta === "true",
+    prioridad: c.prioridad === true || c.prioridad === "TRUE" || c.prioridad === "true",
   };
 }
 
@@ -2455,23 +2457,31 @@ function renderCobranzas(){
     }
   });
 
-  // Ordenar según lo elegido
+  // Ordenar según lo elegido, con prioridad SIEMPRE arriba
   const ordenar = (arr) => {
     const a = arr.slice();
-    if(COBRANZA_ORDEN === "alfabetico") a.sort((x,y)=>(x.cliente||"").localeCompare(y.cliente||"","es"));
-    else if(COBRANZA_ORDEN === "monto") a.sort((x,y)=>(Number(y.importe)||0)-(Number(x.importe)||0));
-    else a.sort((x,y)=>(x.fechaVto||"").localeCompare(y.fechaVto||"")); // vencimiento (default)
+    const cmp = (x,y) => {
+      if(COBRANZA_ORDEN === "alfabetico") return (x.cliente||"").localeCompare(y.cliente||"","es");
+      if(COBRANZA_ORDEN === "monto") return (Number(y.importe)||0)-(Number(x.importe)||0);
+      return (x.fechaVto||"").localeCompare(y.fechaVto||""); // vencimiento (default)
+    };
+    a.sort((x,y) => {
+      // Prioridad manda por encima de todo
+      if(!!x.prioridad !== !!y.prioridad) return x.prioridad ? -1 : 1;
+      return cmp(x,y);
+    });
     return a;
   };
 
   const cobranzas = APP.cobranzas.slice();
 
-  // Separar alertas del resto
-  const alertas = cobranzas.filter(c => c.estadoCruce === "alerta");
-  const enDeuda = cobranzas.filter(c => c.estadoCruce !== "alerta" && c.estadoCruce !== "confirmada" && c.estadoCruce !== "resuelta");
+  // Separar alertas, ocultas y el resto
+  const alertas = cobranzas.filter(c => c.estadoCruce === "alerta" && !c.oculta);
+  const ocultas = cobranzas.filter(c => c.oculta && c.estadoCruce !== "confirmada" && c.estadoCruce !== "resuelta");
+  const enDeuda = cobranzas.filter(c => !c.oculta && c.estadoCruce !== "alerta" && c.estadoCruce !== "confirmada" && c.estadoCruce !== "resuelta");
   const confirmadas = cobranzas.filter(c => c.estadoCruce === "confirmada" || c.estadoCruce === "resuelta");
 
-  // Totales (sobre lo que está en deuda real)
+  // Totales (sobre lo que está en deuda real y visible)
   const totalFacturado = enDeuda.reduce((a,c) => a + (Number(c.importe)||0), 0);
   const totalCobrado = enDeuda.reduce((a,c) => a + (Number(c.montoCobrado)||0), 0);
   const totalPendiente = totalFacturado - totalCobrado;
@@ -2513,6 +2523,37 @@ function renderCobranzas(){
     </div>`;
   }
 
+  // --- Apartado de OCULTAS (plegable, arriba) ---
+  let bloqueOcultas = "";
+  if(ocultas.length){
+    const filasOcultas = ocultas.map(c => `<tr>
+      <td style="padding:6px 12px;font-family:monospace;font-size:11px">${c.id}</td>
+      <td style="padding:6px 12px;font-size:12px">${c.cliente||"—"}</td>
+      <td style="padding:6px 12px;font-size:11px;color:var(--text3)">${adminEfectivo(c)}</td>
+      <td style="padding:6px 12px;font-family:monospace;font-size:11px;text-align:right">${fmtMoneda(c.importe||0)}</td>
+      <td style="padding:6px 12px;text-align:right"><button class="btn btn-sm" onclick="mostrarCobranza('${c.id}')">Mostrar</button></td>
+    </tr>`).join("");
+    bloqueOcultas = `<details style="margin-bottom:16px">
+      <summary style="cursor:pointer;padding:10px 14px;background:var(--surface2);border-radius:var(--radius);font-size:13px;font-weight:500">
+        🙈 ${ocultas.length} factura(s) oculta(s) — clic para ver
+      </summary>
+      <div class="card" style="margin-top:8px">
+        <div style="padding:8px 14px;font-size:11px;color:var(--text2)">Estas facturas están ocultas de la lista principal. No suman en los totales. Podés volver a mostrarlas cuando quieras.</div>
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr style="background:var(--surface2)">
+            <th style="text-align:left;padding:6px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">N° Factura</th>
+            <th style="text-align:left;padding:6px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Cliente</th>
+            <th style="text-align:left;padding:6px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Administración</th>
+            <th style="text-align:right;padding:6px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Importe</th>
+            <th style="padding:6px 12px"></th>
+          </tr></thead>
+          <tbody>${filasOcultas}</tbody>
+        </table>
+        <div style="padding:10px 14px"><button class="btn btn-sm" onclick="mostrarTodasCobranzas()">Mostrar todas</button></div>
+      </div>
+    </details>`;
+  }
+
   const filaCobranza = (c) => {
     const tv = tiempoVencido(c.fechaVto);
     const imp = Number(c.importe)||0;
@@ -2524,8 +2565,8 @@ function renderCobranzas(){
     else if(cob > 0) estadoPago = `<span style="background:var(--amber-bg);color:var(--amber-txt);font-size:10px;padding:2px 8px;border-radius:20px">Parcial</span><br><span style="font-size:10px;color:var(--text3)">falta ${fmtMoneda(saldo)}</span>`;
     else estadoPago = `<span style="color:var(--text3);font-size:11px">Pendiente</span>`;
 
-    return `<tr style="${saldo<=0&&imp>0?'opacity:0.6':''}">
-      <td style="padding:8px 12px;font-family:monospace;font-size:11px">${(c.fechaEmision||"").split("-").reverse().join("/")}</td>
+    return `<tr style="${saldo<=0&&imp>0?'opacity:0.6':''}${c.prioridad?'background:var(--amber-bg)':''}">
+      <td style="padding:8px 12px;font-family:monospace;font-size:11px">${c.prioridad?'⭐ ':''}${(c.fechaEmision||"").split("-").reverse().join("/")}</td>
       <td style="padding:8px 12px;font-family:monospace;font-size:10px;color:var(--text2)">${c.id}</td>
       <td style="padding:8px 12px;font-family:monospace;font-size:11px">${(c.fechaVto||"").split("-").reverse().join("/")}</td>
       <td style="padding:8px 12px;font-size:12px"><strong>${c.cliente||"—"}</strong></td>
@@ -2539,7 +2580,11 @@ function renderCobranzas(){
       <td style="padding:8px 12px;font-size:10px;color:var(--text3);max-width:160px">${c.descripcion||""}</td>
       <td style="padding:8px 12px;text-align:center">${estadoPago}</td>
       <td style="padding:8px 12px;font-size:11px;text-align:right;color:${tv.vencido&&saldo>0?'var(--red-txt)':'var(--text2)'}">${saldo>0?tv.texto:"—"}</td>
-      <td style="padding:8px 12px;text-align:center"><button class="btn btn-sm" onclick="abrirCobro('${c.id}')" style="font-size:11px;padding:3px 8px">Registrar</button></td>
+      <td style="padding:8px 12px;text-align:center;white-space:nowrap">
+        <button class="btn btn-sm" onclick="togglePrioridad('${c.id}')" title="${c.prioridad?'Quitar prioridad':'Marcar prioridad'}" style="font-size:12px;padding:3px 6px">${c.prioridad?'⭐':'☆'}</button>
+        <button class="btn btn-sm" onclick="ocultarCobranza('${c.id}')" title="Ocultar" style="font-size:11px;padding:3px 6px">🙈</button>
+        <button class="btn btn-sm" onclick="abrirCobro('${c.id}')" style="font-size:11px;padding:3px 8px">Registrar</button>
+      </td>
     </tr>`;
   };
 
@@ -2572,7 +2617,7 @@ function renderCobranzas(){
   }
   const filas = cuerpoTabla;
 
-  return `${bloqueAlertas}<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px">
+  return `${bloqueAlertas}${bloqueOcultas}<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px">
       <div style="display:flex;gap:12px">
         <div class="card" style="margin:0;padding:14px 20px;min-width:180px">
           <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px">Deuda pendiente</div>
@@ -2673,6 +2718,38 @@ function guardarAdminFactura(id){
   guardarLocal();
   driveSaveCobranza(id);
   cerrarModal();
+  render();
+}
+
+// Ocultar / mostrar facturas (persistente)
+function ocultarCobranza(id){
+  APP.cobranzas = APP.cobranzas.map(x => x.id===id ? {...x, oculta:true} : x);
+  guardarLocal();
+  driveSaveCobranza(id);
+  render();
+}
+function mostrarCobranza(id){
+  APP.cobranzas = APP.cobranzas.map(x => x.id===id ? {...x, oculta:false} : x);
+  guardarLocal();
+  driveSaveCobranza(id);
+  render();
+}
+function mostrarTodasCobranzas(){
+  const ocultas = APP.cobranzas.filter(x => x.oculta);
+  APP.cobranzas = APP.cobranzas.map(x => x.oculta ? {...x, oculta:false} : x);
+  guardarLocal();
+  render();
+  // Guardar en Drive las que estaban ocultas
+  ocultas.forEach(o => driveSaveCobranza(o.id));
+}
+
+// Marcar / desmarcar prioridad (persistente)
+function togglePrioridad(id){
+  const c = APP.cobranzas.find(x => x.id===id);
+  if(!c) return;
+  APP.cobranzas = APP.cobranzas.map(x => x.id===id ? {...x, prioridad:!x.prioridad} : x);
+  guardarLocal();
+  driveSaveCobranza(id);
   render();
 }
 
@@ -2800,6 +2877,8 @@ async function procesarExcelXubio(input){
         cobrado: false,
         montoCobrado: 0,
         estadoCruce: "pendiente",  // pendiente | transito | confirmada | alerta | resuelta
+        oculta: false,
+        prioridad: false,
       });
     }
 
@@ -2819,6 +2898,8 @@ async function procesarExcelXubio(input){
         n.cobrado = vieja.cobrado || false;
         n.montoCobrado = Number(vieja.montoCobrado) || 0;
         n.administracion = vieja.administracion || "";  // preservar match manual si lo hubo
+        n.oculta = vieja.oculta || false;              // preservar ocultamiento
+        n.prioridad = vieja.prioridad || false;        // preservar prioridad
       }
       const imp = Number(n.importe)||0;
       const cob = Number(n.montoCobrado)||0;
