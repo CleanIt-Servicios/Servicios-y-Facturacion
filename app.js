@@ -2407,7 +2407,40 @@ function normalizarCobranza(c){
   };
 }
 
+// ============================================================
+// MATCH cliente de Xubio ↔ servicio (por razón social)
+// Tolerante en espacios y mayúsculas, exacto en letras y números
+// ============================================================
+function normalizarRazon(txt){
+  return String(txt||"").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+// Devuelve el servicio (activo o baja) cuya razón social coincide, o null
+function servicioPorRazon(razon){
+  const key = normalizarRazon(razon);
+  if(!key) return null;
+  return APP.servicios.find(s => normalizarRazon(s.razonSocial) === key) || null;
+}
+
+// Para una factura, resuelve su administrador cruzando por razón social
+function adminDeFactura(c){
+  // Si ya tiene administración asignada a mano, respetarla
+  if(c.administracion && c.administracion.trim()) return c.administracion.trim();
+  const svc = servicioPorRazon(c.cliente);
+  if(svc && svc.contacto && svc.contacto.trim()) return svc.contacto.trim();
+  return "";
+}
+
 function renderCobranzas(){
+  // Aplicar match automático por razón social a las facturas sin administración
+  APP.cobranzas.forEach(c => {
+    if(!c.administracion || !c.administracion.trim()){
+      const admin = adminDeFactura(c);
+      if(admin) c._adminAuto = admin;  // provisorio en memoria, no se guarda como manual
+      else c._adminAuto = "";
+    }
+  });
+
   const cobranzas = APP.cobranzas.slice()
     .sort((a,b) => (a.fechaVto||"").localeCompare(b.fechaVto||""));
 
@@ -2464,7 +2497,7 @@ function renderCobranzas(){
     const cob = Number(c.montoCobrado)||0;
     const saldo = imp - cob;
     let estadoPago;
-    if(c.estadoCruce === "transito") estadoPago = `<span style="background:var(--blue-bg);color:var(--blue-txt);font-size:10px;padding:2px 8px;border-radius:20px">En tránsito</span><br><span style="font-size:9px;color:var(--text3)">pago hecho, Xubio no lo procesó</span>`;
+    if(c.estadoCruce === "transito") estadoPago = `<span style="background:var(--blue-bg);color:var(--blue-txt);font-size:10px;padding:2px 8px;border-radius:20px">En tránsito</span><br><span style="font-size:9px;color:var(--text3)">cobrado en app, falta marcar en Xubio</span>`;
     else if(saldo <= 0 && imp > 0) estadoPago = `<span style="background:var(--green-bg);color:var(--green-txt);font-size:10px;padding:2px 8px;border-radius:20px">Cobrado</span>`;
     else if(cob > 0) estadoPago = `<span style="background:var(--amber-bg);color:var(--amber-txt);font-size:10px;padding:2px 8px;border-radius:20px">Parcial</span><br><span style="font-size:10px;color:var(--text3)">falta ${fmtMoneda(saldo)}</span>`;
     else estadoPago = `<span style="color:var(--text3);font-size:11px">Pendiente</span>`;
@@ -2474,7 +2507,12 @@ function renderCobranzas(){
       <td style="padding:8px 12px;font-family:monospace;font-size:10px;color:var(--text2)">${c.id}</td>
       <td style="padding:8px 12px;font-family:monospace;font-size:11px">${(c.fechaVto||"").split("-").reverse().join("/")}</td>
       <td style="padding:8px 12px;font-size:12px"><strong>${c.cliente||"—"}</strong></td>
-      <td style="padding:8px 12px;font-size:11px;color:var(--text3)">${c.administracion||"Sin administración"}</td>
+      <td style="padding:8px 12px;font-size:11px;color:var(--text3)">${
+        c.administracion&&c.administracion.trim()
+          ? c.administracion
+          : (c._adminAuto ? `<span style="color:var(--text2)">${c._adminAuto}</span> <span style="font-size:9px;color:var(--blue-txt)">auto</span>`
+             : `<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" onclick="asignarAdminFactura('${c.id}')">asignar</button>`)
+      }</td>
       <td style="padding:8px 12px;font-family:monospace;font-size:11px;text-align:right">${fmtMoneda(imp)}${c.importe2&&c.importe2!==c.importe?`<br><span style="color:var(--amber-txt);font-size:10px">alt: ${fmtMoneda(c.importe2)}</span>`:""}</td>
       <td style="padding:8px 12px;font-size:10px;color:var(--text3);max-width:160px">${c.descripcion||""}</td>
       <td style="padding:8px 12px;text-align:center">${estadoPago}</td>
@@ -2531,6 +2569,49 @@ function resolverAlerta(id){
   APP.cobranzas = APP.cobranzas.map(x => x.id===id ? {...x, estadoCruce:"resuelta", obs:motivo} : x);
   guardarLocal();
   driveSaveCobranza(id);
+  render();
+}
+
+// Asignar administrador a mano a una factura que no matcheó por razón social
+function asignarAdminFactura(id){
+  const c = APP.cobranzas.find(x => x.id === id);
+  if(!c) return;
+  // Lista de administradores existentes (de los servicios) para elegir
+  const admins = [...new Set(APP.servicios.map(s => (s.contacto||"").trim()).filter(Boolean))].sort();
+  const modal = document.getElementById("modal");
+  modal.innerHTML = `
+    <div class="modal-backdrop" onclick="cerrarModal()"></div>
+    <div class="modal-box">
+      <div class="modal-title">Asignar administración</div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:14px">
+        <strong>${c.cliente}</strong><br>
+        <span style="color:var(--text3)">Factura ${c.id}</span><br><br>
+        No se encontró un servicio con esa razón social. Asigná la administración a mano.
+      </div>
+      <div class="modal-field"><label>Elegí un administrador existente</label>
+        <select id="admin-select" onchange="document.getElementById('admin-manual').value=this.value">
+          <option value="">— Elegí —</option>
+          ${admins.map(a=>`<option value="${a}">${a}</option>`).join("")}
+        </select>
+      </div>
+      <div class="modal-field"><label>O escribilo</label>
+        <input id="admin-manual" type="text" placeholder="Nombre de la administración" value="${c.administracion||""}">
+      </div>
+      <div class="modal-actions">
+        <button class="btn" onclick="cerrarModal()">Cancelar</button>
+        <button class="btn btn-primary" onclick="guardarAdminFactura('${id}')">Guardar</button>
+      </div>
+    </div>`;
+  modal.style.display = "flex";
+}
+
+function guardarAdminFactura(id){
+  const val = document.getElementById("admin-manual").value.trim();
+  if(!val){ alert("Elegí o escribí una administración"); return; }
+  APP.cobranzas = APP.cobranzas.map(x => x.id===id ? {...x, administracion:val} : x);
+  guardarLocal();
+  driveSaveCobranza(id);
+  cerrarModal();
   render();
 }
 
