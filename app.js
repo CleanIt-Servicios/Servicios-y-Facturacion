@@ -142,7 +142,7 @@ async function cargarDeDrive(){
       APP.distribucion = data.distribucion || [];
       APP.movimientos  = (data.movimientos || []).map(normalizarMovimiento);
       APP.reclamos     = data.reclamos || [];
-      APP.cobranzas    = data.cobranzas || [];
+      APP.cobranzas    = (data.cobranzas || []).map(normalizarCobranza);
       // Recalcular contadores desde los IDs existentes (para no repetir)
       recalcularContadores();
       guardarLocal();
@@ -2381,8 +2381,30 @@ function fechaExcel(v){
     return isoFecha(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
   }
   const s = String(v).trim();
-  if(s.includes("T")){ const d=new Date(s); if(!isNaN(d.getTime())) return isoFecha(d.getFullYear(),d.getMonth(),d.getDate()); }
+  // Si ya es YYYY-MM-DD limpio, devolverlo tal cual
+  if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  // Si viene con T (fecha ISO con hora), tomar solo la parte de fecha en UTC
+  if(s.includes("T")){
+    const d = new Date(s);
+    if(!isNaN(d.getTime())) return isoFecha(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+    // fallback: cortar antes de la T
+    return s.split("T")[0];
+  }
   return s.slice(0,10);
+}
+
+// Normaliza una factura de cobranza traída de Drive (fechas y números)
+function normalizarCobranza(c){
+  return {
+    ...c,
+    fechaEmision: fechaExcel(c.fechaEmision),
+    fechaVto: fechaExcel(c.fechaVto),
+    importe: Number(c.importe)||0,
+    importe2: Number(c.importe2)||0,
+    montoCobrado: Number(c.montoCobrado)||0,
+    cobrado: c.cobrado === true || c.cobrado === "TRUE" || c.cobrado === "true",
+    estadoCruce: c.estadoCruce || "pendiente",
+  };
 }
 
 function renderCobranzas(){
@@ -2679,13 +2701,34 @@ async function procesarExcelXubio(input){
       }
     });
 
-    APP.cobranzas = [...nuevas, ...desaparecidas];
+    const todas = [...nuevas, ...desaparecidas];
+
+    // Detectar solo las que cambiaron respecto a lo que ya había (para no reescribir 100 iguales)
+    const cambiadas = todas.filter(f => {
+      const vieja = viejasPorId[String(f.id)];
+      if(!vieja) return true; // nueva
+      // Comparar los campos que importan
+      return vieja.fechaEmision !== f.fechaEmision ||
+             vieja.fechaVto !== f.fechaVto ||
+             (Number(vieja.importe)||0) !== (Number(f.importe)||0) ||
+             (Number(vieja.montoCobrado)||0) !== (Number(f.montoCobrado)||0) ||
+             (vieja.cobrado||false) !== (f.cobrado||false) ||
+             (vieja.estadoCruce||"pendiente") !== (f.estadoCruce||"pendiente") ||
+             (vieja.cliente||"") !== (f.cliente||"") ||
+             (vieja.administracion||"") !== (f.administracion||"");
+    });
+
+    APP.cobranzas = todas;
     guardarLocal();
     render();
     const nAlertas = desaparecidas.filter(d => d.estadoCruce==="alerta").length;
-    status.textContent = `✅ ${nuevas.length} factura(s) en deuda${nAlertas?` · ⚠️ ${nAlertas} alerta(s) detectada(s)`:""}. Guardando en Drive...`;
-    const r = await driveSaveCobranzasBulk([...nuevas, ...desaparecidas]);
-    document.getElementById("cobranza-status").textContent = `✅ ${nuevas.length} en deuda · ${desaparecidas.filter(d=>d.estadoCruce==="confirmada").length} confirmada(s) · ${nAlertas} alerta(s) · guardadas: ${r.ok}`;
+    if(!cambiadas.length){
+      document.getElementById("cobranza-status").textContent = `✅ ${nuevas.length} factura(s) · sin cambios respecto a lo guardado (no se reescribió nada)`;
+    } else {
+      status.textContent = `✅ ${nuevas.length} en deuda${nAlertas?` · ⚠️ ${nAlertas} alerta(s)`:""}. Guardando ${cambiadas.length} cambio(s)...`;
+      const r = await driveSaveCobranzasBulk(cambiadas);
+      document.getElementById("cobranza-status").textContent = `✅ ${nuevas.length} en deuda · ${desaparecidas.filter(d=>d.estadoCruce==="confirmada").length} confirmada(s) · ${nAlertas} alerta(s) · ${r.ok} guardada(s)`;
+    }
   }catch(e){
     console.error(e);
     status.textContent = "❌ Error al leer el archivo: " + e.message;
