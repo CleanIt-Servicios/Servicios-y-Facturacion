@@ -2389,19 +2389,61 @@ function renderCobranzas(){
   const cobranzas = APP.cobranzas.slice()
     .sort((a,b) => (a.fechaVto||"").localeCompare(b.fechaVto||""));
 
-  // Totales
-  const totalFacturado = cobranzas.reduce((a,c) => a + (Number(c.importe)||0), 0);
-  const totalCobrado = cobranzas.reduce((a,c) => a + (Number(c.montoCobrado)||0), 0);
+  // Separar alertas del resto
+  const alertas = cobranzas.filter(c => c.estadoCruce === "alerta");
+  const enDeuda = cobranzas.filter(c => c.estadoCruce !== "alerta" && c.estadoCruce !== "confirmada" && c.estadoCruce !== "resuelta");
+  const confirmadas = cobranzas.filter(c => c.estadoCruce === "confirmada" || c.estadoCruce === "resuelta");
+
+  // Totales (sobre lo que está en deuda real)
+  const totalFacturado = enDeuda.reduce((a,c) => a + (Number(c.importe)||0), 0);
+  const totalCobrado = enDeuda.reduce((a,c) => a + (Number(c.montoCobrado)||0), 0);
   const totalPendiente = totalFacturado - totalCobrado;
 
-  const filas = cobranzas.map(c => {
+  // --- Apartado de ALERTAS (arriba, bien visible) ---
+  let bloqueAlertas = "";
+  if(alertas.length){
+    const filasAlerta = alertas.map(c => `<tr>
+      <td style="padding:8px 12px;font-family:monospace;font-size:11px">${c.id}</td>
+      <td style="padding:8px 12px;font-size:12px"><strong>${c.cliente||"—"}</strong></td>
+      <td style="padding:8px 12px;font-family:monospace;font-size:11px;text-align:right">${fmtMoneda(c.importe||0)}</td>
+      <td style="padding:8px 12px;font-size:10px;color:var(--text3);max-width:200px">${c.descripcion||""}</td>
+      <td style="padding:8px 12px;white-space:nowrap;text-align:right">
+        <button class="btn btn-sm" onclick="abrirCobro('${c.id}')">Cobrar</button>
+        <button class="btn btn-sm" onclick="resolverAlerta('${c.id}')" style="color:var(--text2)">Resolver sin cobrar</button>
+      </td>
+    </tr>`).join("");
+    bloqueAlertas = `<div class="card" style="border:1.5px solid var(--red-txt);margin-bottom:16px">
+      <div class="card-header" style="background:var(--red-bg)">
+        <h3 style="color:var(--red-txt)">⚠️ ${alertas.length} factura(s) para revisar</h3>
+        <span style="font-size:11px;color:var(--red-txt)">Salieron de Xubio sin registrarse como cobradas</span>
+      </div>
+      <div style="padding:0 0 4px">
+        <div style="font-size:11px;color:var(--text2);padding:10px 16px">
+          Estas facturas ya no aparecen en la deuda de Xubio, pero nunca las marcaste como cobradas.
+          Pueden ser cobros que no registraste, o facturas que se dieron de baja. Revisá cada una.
+        </div>
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr style="background:var(--surface2)">
+            <th style="text-align:left;padding:6px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">N° Factura</th>
+            <th style="text-align:left;padding:6px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Cliente</th>
+            <th style="text-align:right;padding:6px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Importe</th>
+            <th style="text-align:left;padding:6px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Descripción</th>
+            <th style="padding:6px 12px"></th>
+          </tr></thead>
+          <tbody>${filasAlerta}</tbody>
+        </table>
+      </div>
+    </div>`;
+  }
+
+  const filas = enDeuda.map(c => {
     const tv = tiempoVencido(c.fechaVto);
     const imp = Number(c.importe)||0;
     const cob = Number(c.montoCobrado)||0;
     const saldo = imp - cob;
-    // Estado visual del pago
     let estadoPago;
-    if(saldo <= 0 && imp > 0) estadoPago = `<span style="background:var(--green-bg);color:var(--green-txt);font-size:10px;padding:2px 8px;border-radius:20px">Cobrado</span>`;
+    if(c.estadoCruce === "transito") estadoPago = `<span style="background:var(--blue-bg);color:var(--blue-txt);font-size:10px;padding:2px 8px;border-radius:20px">En tránsito</span><br><span style="font-size:9px;color:var(--text3)">pago hecho, Xubio no lo procesó</span>`;
+    else if(saldo <= 0 && imp > 0) estadoPago = `<span style="background:var(--green-bg);color:var(--green-txt);font-size:10px;padding:2px 8px;border-radius:20px">Cobrado</span>`;
     else if(cob > 0) estadoPago = `<span style="background:var(--amber-bg);color:var(--amber-txt);font-size:10px;padding:2px 8px;border-radius:20px">Parcial</span><br><span style="font-size:10px;color:var(--text3)">falta ${fmtMoneda(saldo)}</span>`;
     else estadoPago = `<span style="color:var(--text3);font-size:11px">Pendiente</span>`;
 
@@ -2419,7 +2461,7 @@ function renderCobranzas(){
     </tr>`;
   }).join("");
 
-  return `<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px">
+  return `${bloqueAlertas}<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px">
       <div style="display:flex;gap:12px">
         <div class="card" style="margin:0;padding:14px 20px;min-width:180px">
           <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px">Deuda pendiente</div>
@@ -2431,7 +2473,7 @@ function renderCobranzas(){
         </div>
         <div class="card" style="margin:0;padding:14px 20px;min-width:130px">
           <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px">Facturas</div>
-          <div style="font-size:30px;font-weight:600;line-height:1.2">${cobranzas.length}</div>
+          <div style="font-size:30px;font-weight:600;line-height:1.2">${enDeuda.length}</div>
         </div>
       </div>
       <div style="display:flex;gap:8px">
@@ -2440,7 +2482,7 @@ function renderCobranzas(){
       </div>
     </div>
     <div id="cobranza-status" style="font-size:12px;color:var(--text2);margin-bottom:12px"></div>
-    <div class="card"><div class="card-header"><h3>Cuentas a cobrar</h3></div>
+    <div class="card"><div class="card-header"><h3>Cuentas a cobrar</h3>${confirmadas.length?`<span style="font-size:11px;color:var(--text3)">${confirmadas.length} confirmada(s) archivada(s)</span>`:""}</div>
     <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
       <thead><tr style="background:var(--surface2)">
         <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Emisión</th>
@@ -2454,8 +2496,20 @@ function renderCobranzas(){
         <th style="text-align:right;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Vencido</th>
         <th style="padding:8px 12px"></th>
       </tr></thead>
-      <tbody>${filas || `<tr><td colspan="10" style="text-align:center;padding:32px;color:var(--text3)">No hay facturas cargadas. Subí el Excel de Xubio para empezar.</td></tr>`}</tbody>
+      <tbody>${filas || `<tr><td colspan="10" style="text-align:center;padding:32px;color:var(--text3)">No hay facturas en deuda. Subí el Excel de Xubio para empezar.</td></tr>`}</tbody>
     </table></div></div>`;
+}
+
+// Resolver una alerta sin cobrarla (se dio de baja, era un error, etc.)
+function resolverAlerta(id){
+  const c = APP.cobranzas.find(x => x.id === id);
+  if(!c) return;
+  const motivo = prompt(`Resolver la factura ${c.id} de ${c.cliente} sin cobrarla.\n\n¿Motivo? (opcional)`, "");
+  if(motivo === null) return; // canceló
+  APP.cobranzas = APP.cobranzas.map(x => x.id===id ? {...x, estadoCruce:"resuelta", obs:motivo} : x);
+  guardarLocal();
+  driveSaveCobranza(id);
+  render();
 }
 
 // Modal de registro de cobro (total o parcial)
@@ -2581,28 +2635,57 @@ async function procesarExcelXubio(input){
         descripcion: String(row[iDesc]||"").trim(),
         cobrado: false,
         montoCobrado: 0,
+        estadoCruce: "pendiente",  // pendiente | transito | confirmada | alerta | resuelta
       });
     }
 
     if(!nuevas.length){ status.textContent = "⚠️ No se encontraron facturas en el archivo. Revisá el formato."; input.value=""; return; }
 
-    // CRUCE: preservar los cobros ya marcados de las facturas que siguen
-    const cobradosPrevios = {};
-    APP.cobranzas.forEach(c => { if(c.cobrado || c.montoCobrado) cobradosPrevios[c.id] = { cobrado:c.cobrado, montoCobrado:c.montoCobrado }; });
+    // ========================================================
+    // CRUCE: comparar lo viejo con lo nuevo, sin perder nada
+    // ========================================================
+    const numerosNuevos = new Set(nuevas.map(n => String(n.id)));
+    const viejasPorId = {};
+    APP.cobranzas.forEach(c => { viejasPorId[String(c.id)] = c; });
 
+    // 1) Facturas del Excel nuevo: preservar cobros previos y calcular estado
     nuevas.forEach(n => {
-      if(cobradosPrevios[n.id]){
-        n.cobrado = cobradosPrevios[n.id].cobrado;
-        n.montoCobrado = cobradosPrevios[n.id].montoCobrado;
+      const vieja = viejasPorId[String(n.id)];
+      if(vieja){
+        n.cobrado = vieja.cobrado || false;
+        n.montoCobrado = Number(vieja.montoCobrado) || 0;
+        n.administracion = vieja.administracion || "";  // preservar match manual si lo hubo
+      }
+      const imp = Number(n.importe)||0;
+      const cob = Number(n.montoCobrado)||0;
+      // Está en Xubio (sigue en la deuda). Si la marcaste cobrada → en tránsito.
+      if(cob > 0 && cob >= imp) n.estadoCruce = "transito";  // pagada en app, Xubio todavía la muestra
+      else n.estadoCruce = "pendiente";
+    });
+
+    // 2) Facturas que estaban antes y YA NO están en el Excel nuevo (desaparecieron de Xubio)
+    const desaparecidas = [];
+    APP.cobranzas.forEach(c => {
+      if(numerosNuevos.has(String(c.id))) return;       // sigue en Xubio, ya la procesamos arriba
+      if(c.estadoCruce === "resuelta") { desaparecidas.push(c); return; } // ya resuelta antes, se mantiene
+      const imp = Number(c.importe)||0;
+      const cob = Number(c.montoCobrado)||0;
+      if(cob >= imp && imp > 0){
+        // Estaba cobrada y ya no está en Xubio → cobro confirmado, cerró bien
+        desaparecidas.push({ ...c, estadoCruce: "confirmada" });
+      } else {
+        // Desapareció de Xubio pero NO estaba cobrada → ALERTA
+        desaparecidas.push({ ...c, estadoCruce: "alerta" });
       }
     });
 
-    APP.cobranzas = nuevas;
+    APP.cobranzas = [...nuevas, ...desaparecidas];
     guardarLocal();
     render();
-    status.textContent = `✅ ${nuevas.length} factura(s) cargadas. Guardando en Drive...`;
-    const r = await driveSaveCobranzasBulk(nuevas);
-    document.getElementById("cobranza-status").textContent = `✅ ${nuevas.length} factura(s) cargadas · guardadas en Drive: ${r.ok} · errores: ${r.fail}`;
+    const nAlertas = desaparecidas.filter(d => d.estadoCruce==="alerta").length;
+    status.textContent = `✅ ${nuevas.length} factura(s) en deuda${nAlertas?` · ⚠️ ${nAlertas} alerta(s) detectada(s)`:""}. Guardando en Drive...`;
+    const r = await driveSaveCobranzasBulk([...nuevas, ...desaparecidas]);
+    document.getElementById("cobranza-status").textContent = `✅ ${nuevas.length} en deuda · ${desaparecidas.filter(d=>d.estadoCruce==="confirmada").length} confirmada(s) · ${nAlertas} alerta(s) · guardadas: ${r.ok}`;
   }catch(e){
     console.error(e);
     status.textContent = "❌ Error al leer el archivo: " + e.message;
