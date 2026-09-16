@@ -89,7 +89,7 @@ function nuevoId(prefijo){
 // ============================================================
 const LS_KEY = "cleanit_v2";
 // Pegar acá la URL del Apps Script publicado (termina en /exec)
-const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw3whyuVsG4OwkQIMSoEc31lCDSdHqs-DiIN-bVYJq0Q4T26NNkGIyw_oFGer4kKnnH/exec";  // Apps Script de PRODUCCION
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw6YtTBxJ3COqwxBWI2py1zNJuEP9SY8-7nhiv-2U-rEwCePKVp9QfKYHc5lEaTFeTx/exec";  // Apps Script de PRUEBA
 
 function driveActivo(){ return SCRIPT_URL && SCRIPT_URL.indexOf("/exec") > 0; }
 
@@ -2438,7 +2438,33 @@ function adminDeFactura(c){
   return "";
 }
 
+// Mail de una factura, sacado del servicio que matchea por razón social
+function mailDeFactura(c){
+  const svc = servicioPorRazon(c.cliente);
+  if(svc && svc.mail && svc.mail.trim()) return svc.mail.trim();
+  return "";
+}
+
+// Número de factura corto para mostrar: LETRA (A/B) + últimos 5 números.
+// Ej: "Factura de Venta N° A-00010-00001173" → "A-01173".
+// El id completo NO se toca (es la llave del match).
+function numeroCorto(id){
+  const s = String(id||"").trim();
+  // Letra de comprobante (A, B, C, E, M...) — la que está antes del primer guión con números
+  const mLetra = s.match(/\b([A-Z])\s*-\s*\d/i);
+  const letra = mLetra ? mLetra[1].toUpperCase() : "";
+  // Último bloque largo de dígitos (la numeración de la factura)
+  const bloques = s.match(/\d{3,}/g);
+  if(bloques && bloques.length){
+    const ult = bloques[bloques.length - 1];
+    const cinco = ult.slice(-5);
+    return letra ? `${letra}-${cinco}` : cinco;
+  }
+  return s;
+}
+
 let COBRANZA_ORDEN = "vencimiento"; // vencimiento | alfabetico | monto | admin
+let COBRANZA_BUSQUEDA = ""; // filtro por razón social/cliente
 
 // Admin efectivo de una factura (manual o auto), para ordenar/agrupar
 function adminEfectivo(c){
@@ -2475,15 +2501,20 @@ function renderCobranzas(){
 
   const cobranzas = APP.cobranzas.slice();
 
-  // Separar alertas, ocultas y el resto
+  // Filtro de búsqueda por razón social / cliente
+  const q = COBRANZA_BUSQUEDA.trim().toLowerCase();
+  const pasaBusqueda = (c) => !q || (c.cliente||"").toLowerCase().includes(q);
+
+  // Separar alertas, ocultas y el resto (aplicando búsqueda al resto)
   const alertas = cobranzas.filter(c => c.estadoCruce === "alerta" && !c.oculta);
   const ocultas = cobranzas.filter(c => c.oculta && c.estadoCruce !== "confirmada" && c.estadoCruce !== "resuelta");
-  const enDeuda = cobranzas.filter(c => !c.oculta && c.estadoCruce !== "alerta" && c.estadoCruce !== "confirmada" && c.estadoCruce !== "resuelta");
+  const enDeuda = cobranzas.filter(c => !c.oculta && c.estadoCruce !== "alerta" && c.estadoCruce !== "confirmada" && c.estadoCruce !== "resuelta" && pasaBusqueda(c));
   const confirmadas = cobranzas.filter(c => c.estadoCruce === "confirmada" || c.estadoCruce === "resuelta");
 
-  // Totales (sobre lo que está en deuda real y visible)
-  const totalFacturado = enDeuda.reduce((a,c) => a + (Number(c.importe)||0), 0);
-  const totalCobrado = enDeuda.reduce((a,c) => a + (Number(c.montoCobrado)||0), 0);
+  // Totales (sobre lo que está en deuda real y visible, sin filtro de búsqueda para que el total sea real)
+  const enDeudaTotal = cobranzas.filter(c => !c.oculta && c.estadoCruce !== "alerta" && c.estadoCruce !== "confirmada" && c.estadoCruce !== "resuelta");
+  const totalFacturado = enDeudaTotal.reduce((a,c) => a + (Number(c.importe)||0), 0);
+  const totalCobrado = enDeudaTotal.reduce((a,c) => a + (Number(c.montoCobrado)||0), 0);
   const totalPendiente = totalFacturado - totalCobrado;
 
   // --- Apartado de ALERTAS (arriba, bien visible) ---
@@ -2567,17 +2598,15 @@ function renderCobranzas(){
 
     return `<tr style="${saldo<=0&&imp>0?'opacity:0.6':''}${c.prioridad?'background:var(--amber-bg)':''}">
       <td style="padding:8px 12px;font-family:monospace;font-size:11px">${c.prioridad?'⭐ ':''}${(c.fechaEmision||"").split("-").reverse().join("/")}</td>
-      <td style="padding:8px 12px;font-family:monospace;font-size:10px;color:var(--text2)">${c.id}</td>
+      <td style="padding:8px 12px;font-family:monospace;font-size:10px;color:var(--text2)" title="${c.id}">${numeroCorto(c.id)}</td>
       <td style="padding:8px 12px;font-family:monospace;font-size:11px">${(c.fechaVto||"").split("-").reverse().join("/")}</td>
       <td style="padding:8px 12px;font-size:12px"><strong>${c.cliente||"—"}</strong></td>
-      <td style="padding:8px 12px;font-size:11px;color:var(--text3)">${
-        c.administracion&&c.administracion.trim()
-          ? c.administracion
-          : (c._adminAuto ? `<span style="color:var(--text2)">${c._adminAuto}</span> <span style="font-size:9px;color:var(--blue-txt)">auto</span>`
-             : `<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" onclick="asignarAdminFactura('${c.id}')">asignar</button>`)
-      }</td>
+      <td style="padding:8px 12px;font-size:11px;color:var(--text3)">${mailDeFactura(c)||'<span style="color:var(--text3)">—</span>'}</td>
       <td style="padding:8px 12px;font-family:monospace;font-size:11px;text-align:right">${fmtMoneda(imp)}${c.importe2&&c.importe2!==c.importe?`<br><span style="color:var(--amber-txt);font-size:10px">alt: ${fmtMoneda(c.importe2)}</span>`:""}</td>
-      <td style="padding:8px 12px;font-size:10px;color:var(--text3);max-width:160px">${c.descripcion||""}</td>
+      <td style="padding:8px 12px;font-size:10px;color:var(--text3);max-width:180px">
+        <span>${c.descripcion||'<span style="color:var(--text3)">—</span>'}</span>
+        <button class="btn btn-sm" onclick="editarDetalleCobranza('${c.id}')" title="Editar detalle" style="font-size:10px;padding:1px 5px;margin-left:4px">✎</button>
+      </td>
       <td style="padding:8px 12px;text-align:center">${estadoPago}</td>
       <td style="padding:8px 12px;font-size:11px;text-align:right;color:${tv.vencido&&saldo>0?'var(--red-txt)':'var(--text2)'}">${saldo>0?tv.texto:"—"}</td>
       <td style="padding:8px 12px;text-align:center;white-space:nowrap">
@@ -2633,14 +2662,22 @@ function renderCobranzas(){
         </div>
       </div>
       <div style="display:flex;gap:8px">
+        <button class="btn" onclick="copiarMailsCobranza()">✉️ Copiar mails</button>
         <input type="file" id="xubio-file" accept=".xlsx,.xls" style="display:none" onchange="procesarExcelXubio(this)">
         <button class="btn btn-primary" onclick="document.getElementById('xubio-file').click()">📥 Subir Excel de Xubio</button>
       </div>
     </div>
     <div id="cobranza-status" style="font-size:12px;color:var(--text2);margin-bottom:12px"></div>
+    <div style="margin-bottom:12px">
+      <input type="text" id="cobranza-busqueda" value="${COBRANZA_BUSQUEDA}" placeholder="🔍 Buscar por razón social (ej: mirabili, juncal)..."
+        oninput="COBRANZA_BUSQUEDA=this.value;renderSoloTablaCobranza()"
+        style="width:100%;max-width:420px;padding:9px 14px;border:1px solid var(--border2);border-radius:var(--radius);font-size:13px">
+      ${COBRANZA_BUSQUEDA?`<button class="btn btn-sm" onclick="COBRANZA_BUSQUEDA='';render()" style="margin-left:8px">✕ Limpiar</button>`:""}
+    </div>
     <div class="card"><div class="card-header"><h3>Cuentas a cobrar</h3>
       <div style="display:flex;align-items:center;gap:10px">
         ${confirmadas.length?`<span style="font-size:11px;color:var(--text3)">${confirmadas.length} confirmada(s) archivada(s)</span>`:""}
+        ${q?`<span style="font-size:11px;color:var(--primary)">${enDeuda.length} resultado(s)</span>`:""}
         <span style="font-size:11px;color:var(--text3)">Ordenar:</span>
         <select onchange="COBRANZA_ORDEN=this.value;render()" style="padding:5px 10px;border:1px solid var(--border2);border-radius:var(--radius);font-size:12px">
           <option value="vencimiento" ${COBRANZA_ORDEN==="vencimiento"?"selected":""}>Por vencimiento</option>
@@ -2655,7 +2692,7 @@ function renderCobranzas(){
         <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">N° Factura</th>
         <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Vencimiento</th>
         <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Cliente</th>
-        <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Administración</th>
+        <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Mail</th>
         <th style="text-align:right;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Importe</th>
         <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Descripción</th>
         <th style="text-align:center;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Pago</th>
@@ -2751,6 +2788,54 @@ function togglePrioridad(id){
   guardarLocal();
   driveSaveCobranza(id);
   render();
+}
+
+// Editar el detalle/descripción de una factura
+function editarDetalleCobranza(id){
+  const c = APP.cobranzas.find(x => x.id===id);
+  if(!c) return;
+  const nuevo = prompt(`Detalle de la factura ${numeroCorto(c.id)} — ${c.cliente}\n\nPodés agregar notas como "retención" o "faltante de pago":`, c.descripcion||"");
+  if(nuevo === null) return; // canceló
+  APP.cobranzas = APP.cobranzas.map(x => x.id===id ? {...x, descripcion:nuevo} : x);
+  guardarLocal();
+  driveSaveCobranza(id);
+  render();
+}
+
+// Copiar los mails de las facturas visibles (según búsqueda/filtro actual)
+function copiarMailsCobranza(){
+  const q = COBRANZA_BUSQUEDA.trim().toLowerCase();
+  const visibles = APP.cobranzas.filter(c =>
+    !c.oculta && c.estadoCruce!=="alerta" && c.estadoCruce!=="confirmada" && c.estadoCruce!=="resuelta" &&
+    (!q || (c.cliente||"").toLowerCase().includes(q)));
+  // Juntar mails únicos
+  const mails = [...new Set(visibles.map(c => mailDeFactura(c)).filter(Boolean))];
+  if(!mails.length){ alert("No se encontraron mails para las facturas visibles.\n\n(El mail sale del servicio que matchea por razón social; si no hay match, no hay mail.)"); return; }
+  const texto = mails.join(", ");
+  navigator.clipboard.writeText(texto).then(() => {
+    const st = document.getElementById("cobranza-status");
+    if(st) st.textContent = `✅ ${mails.length} mail(s) copiados al portapapeles. Pegalos en el "Para" de tu correo.`;
+  }).catch(() => {
+    // Fallback si el navegador no deja copiar
+    prompt("Copiá estos mails:", texto);
+  });
+}
+
+// Refresca solo la pantalla de cobranzas sin perder el foco del buscador
+let _busquedaTimer = null;
+function renderSoloTablaCobranza(){
+  if(_busquedaTimer) clearTimeout(_busquedaTimer);
+  _busquedaTimer = setTimeout(() => {
+    const cont = document.getElementById("content");
+    if(cont && APP.screen === "cobranzas"){
+      const input = document.getElementById("cobranza-busqueda");
+      const pos = input ? input.selectionStart : null;
+      cont.innerHTML = renderCobranzas();
+      // Restaurar foco y cursor en el buscador
+      const nuevo = document.getElementById("cobranza-busqueda");
+      if(nuevo){ nuevo.focus(); if(pos!==null) nuevo.setSelectionRange(pos,pos); }
+    }
+  }, 200);
 }
 
 // Modal de registro de cobro (total o parcial)
