@@ -24,6 +24,7 @@ const APP = {
   distribucion: [],   // hoja 5  (1 fila por servicio, con array de turnos)
   movimientos: [],    // hoja 8
   reclamos: [],       // hoja 9  (reclamos de facturación)
+  cobranzas: [],      // hoja 10 (facturas de Xubio + cobros)
 
   // --- Auth ---
   auth: {
@@ -49,11 +50,11 @@ const USUARIOS_LOGIN = {
 
 const PERMISOS = {
   rrhh: {
-    screens: ["servicios","bajas","operarios","personal","distribucion","control","movimientos","prefac","reclamos","config"],
+    screens: ["servicios","bajas","operarios","personal","distribucion","control","movimientos","prefac","cobranzas","reclamos","config"],
     editar: true, verValores: true, verFacturacion: true, darBaja: true, configurar: true, verTodo: true,
   },
   facturacion: {
-    screens: ["servicios","prefac","movimientos","reclamos"],
+    screens: ["servicios","prefac","cobranzas","movimientos","reclamos","comercial","comercial-bajas"],
     editar: false, verValores: true, verFacturacion: true, darBaja: false, configurar: false, verTodo: true,
   },
   jefe: {
@@ -102,6 +103,7 @@ function guardarLocal(){
       distribucion: APP.distribucion,
       movimientos: APP.movimientos,
       reclamos: APP.reclamos,
+      cobranzas: APP.cobranzas,
       contadores: APP.contadores,
     }));
   }catch(e){ console.error("Error guardando local:", e); }
@@ -119,6 +121,7 @@ function cargarLocal(){
     APP.distribucion = d.distribucion || [];
     APP.movimientos  = d.movimientos  || [];
     APP.reclamos     = d.reclamos     || [];
+    APP.cobranzas    = d.cobranzas    || [];
     APP.contadores   = d.contadores   || { S:0, O:0, P:0, M:0, R:0 };
     return true;
   }catch(e){ console.error("Error cargando local:", e); return false; }
@@ -139,6 +142,7 @@ async function cargarDeDrive(){
       APP.distribucion = data.distribucion || [];
       APP.movimientos  = (data.movimientos || []).map(normalizarMovimiento);
       APP.reclamos     = data.reclamos || [];
+      APP.cobranzas    = (data.cobranzas || []).map(normalizarCobranza);
       // Recalcular contadores desde los IDs existentes (para no repetir)
       recalcularContadores();
       guardarLocal();
@@ -241,6 +245,39 @@ async function driveDeleteReclamo(id){
   }catch(e){ console.error(e); }
 }
 
+// Guarda una factura de cobranza (upsert por número de factura = id)
+async function driveSaveCobranza(id){
+  if(!driveActivo()) return;
+  const c = APP.cobranzas.find(x => x.id === id);
+  if(!c) return;
+  try{
+    await fetch(SCRIPT_URL, { method:"POST", body: JSON.stringify({ action:"upsertCobranza", cobranza:c })});
+  }catch(e){ console.error(e); }
+}
+
+// Guarda muchas facturas de cobranza de una (para la importación del Excel)
+async function driveSaveCobranzasBulk(lista){
+  if(!driveActivo()) return {ok:0, fail:0};
+  let ok=0, fail=0;
+  for(let i=0; i<lista.length; i++){
+    showLoading(`💾 Guardando factura ${i+1}/${lista.length}...`);
+    try{
+      const resp = await fetch(SCRIPT_URL, { method:"POST", body: JSON.stringify({ action:"upsertCobranza", cobranza:lista[i] })});
+      const d = await resp.json();
+      d.ok ? ok++ : fail++;
+    }catch(e){ fail++; }
+  }
+  hideLoading();
+  return {ok, fail};
+}
+
+async function driveDeleteCobranza(id){
+  if(!driveActivo()) return;
+  try{
+    await fetch(SCRIPT_URL, { method:"POST", body: JSON.stringify({ action:"deleteCobranza", id:id })});
+  }catch(e){ console.error(e); }
+}
+
 // ============================================================
 // AUTH
 // ============================================================
@@ -276,6 +313,11 @@ function intentarLogin(){
 
   APP.screen = PERMISOS[usr.perfil].screens[0];
   render();
+
+  // Ahora que entró, traer lo último de Drive (ya no molesta al login)
+  if(driveActivo()){
+    cargarDeDrive().then(ok => { if(ok) render(); });
+  }
 }
 
 function cerrarSesion(){
@@ -305,6 +347,7 @@ const SCREENS = {
   control:      { titulo: "Control de horas", icono: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" },
   movimientos:  { titulo: "Movimientos",      icono: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" },
   prefac:       { titulo: "Prefacturación",   icono: "M9 7h6m-6 4h6m-6 4h4m-8 4h12a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z" },
+  cobranzas:    { titulo: "Cobranzas",        icono: "M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" },
   reclamos:     { titulo: "Reclamos",         icono: "M12 9v2m0 4h.01M5 19h14a2 2 0 001.84-2.75L13.74 4a2 2 0 00-3.5 0L3.16 16.25A2 2 0 005 19z" },
   comercial:    { titulo: "Comercial",        icono: "M3 3v18h18M18 17V9M13 17V5M8 17v-3" },
   bajas:        { titulo: "Bajas",             icono: "M18 6L6 18M6 6l12 12" },
@@ -315,7 +358,7 @@ const SCREENS = {
 const NAV_GROUPS = [
   { label: "Operaciones", items: ["servicios","bajas","distribucion","control"] },
   { label: "Personal",    items: ["operarios","personal"] },
-  { label: "Gestión",     items: ["movimientos","prefac","reclamos"] },
+  { label: "Gestión",     items: ["movimientos","prefac","cobranzas","reclamos"] },
   { label: "Comercial",   items: ["comercial","comercial-bajas"] },
   { label: "Sistema",     items: ["config"] },
 ];
@@ -2316,6 +2359,606 @@ function renderComercialBajas(){
     </table></div></div>`;
 }
 
+// ============================================================
+// COBRANZAS — facturas de Xubio + cobros
+// ============================================================
+// Calcula el tiempo vencido desde la fecha de vencimiento hasta hoy
+function tiempoVencido(fechaVto){
+  if(!fechaVto) return { dias:0, texto:"—", vencido:false };
+  const vto = new Date(fechaVto + "T00:00:00");
+  if(isNaN(vto.getTime())) return { dias:0, texto:"—", vencido:false };
+  const hoy = new Date(); hoy.setHours(0,0,0,0);
+  const dias = Math.floor((hoy - vto) / (1000*60*60*24));
+  if(dias < 0) return { dias, texto:`faltan ${-dias}d`, vencido:false };
+  if(dias === 0) return { dias, texto:"vence hoy", vencido:false };
+  if(dias < 30) return { dias, texto:`${dias} días`, vencido:true };
+  const meses = Math.floor(dias/30);
+  return { dias, texto:`${meses} ${meses===1?"mes":"meses"}`, vencido:true };
+}
+
+// Normaliza una fecha que puede venir como Date, número de Excel o string
+function fechaExcel(v){
+  if(!v) return "";
+  if(v instanceof Date) return isoFecha(v.getFullYear(), v.getMonth(), v.getDate());
+  if(typeof v === "number"){
+    // Excel: días desde 1899-12-30
+    const d = new Date(Math.round((v - 25569) * 86400 * 1000));
+    return isoFecha(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  }
+  const s = String(v).trim();
+  // Si ya es YYYY-MM-DD limpio, devolverlo tal cual
+  if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  // Si viene con T (fecha ISO con hora), tomar solo la parte de fecha en UTC
+  if(s.includes("T")){
+    const d = new Date(s);
+    if(!isNaN(d.getTime())) return isoFecha(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+    // fallback: cortar antes de la T
+    return s.split("T")[0];
+  }
+  return s.slice(0,10);
+}
+
+// Normaliza una factura de cobranza traída de Drive (fechas y números)
+function normalizarCobranza(c){
+  return {
+    ...c,
+    fechaEmision: fechaExcel(c.fechaEmision),
+    fechaVto: fechaExcel(c.fechaVto),
+    importe: Number(c.importe)||0,
+    importe2: Number(c.importe2)||0,
+    montoCobrado: Number(c.montoCobrado)||0,
+    cobrado: c.cobrado === true || c.cobrado === "TRUE" || c.cobrado === "true",
+    estadoCruce: c.estadoCruce || "pendiente",
+    oculta: c.oculta === true || c.oculta === "TRUE" || c.oculta === "true",
+    prioridad: c.prioridad === true || c.prioridad === "TRUE" || c.prioridad === "true",
+  };
+}
+
+// ============================================================
+// MATCH cliente de Xubio ↔ servicio (por razón social)
+// Tolerante en espacios y mayúsculas, exacto en letras y números
+// ============================================================
+function normalizarRazon(txt){
+  return String(txt||"").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+// Devuelve el servicio (activo o baja) cuya razón social coincide, o null
+function servicioPorRazon(razon){
+  const key = normalizarRazon(razon);
+  if(!key) return null;
+  return APP.servicios.find(s => normalizarRazon(s.razonSocial) === key) || null;
+}
+
+// Para una factura, resuelve su administrador cruzando por razón social
+function adminDeFactura(c){
+  // Si ya tiene administración asignada a mano, respetarla
+  if(c.administracion && c.administracion.trim()) return c.administracion.trim();
+  const svc = servicioPorRazon(c.cliente);
+  if(svc && svc.contacto && svc.contacto.trim()) return svc.contacto.trim();
+  return "";
+}
+
+let COBRANZA_ORDEN = "vencimiento"; // vencimiento | alfabetico | monto | admin
+
+// Admin efectivo de una factura (manual o auto), para ordenar/agrupar
+function adminEfectivo(c){
+  if(c.administracion && c.administracion.trim()) return c.administracion.trim();
+  if(c._adminAuto && c._adminAuto.trim()) return c._adminAuto.trim();
+  return "Sin administración";
+}
+
+function renderCobranzas(){
+  // Aplicar match automático por razón social a las facturas sin administración
+  APP.cobranzas.forEach(c => {
+    if(!c.administracion || !c.administracion.trim()){
+      const admin = adminDeFactura(c);
+      if(admin) c._adminAuto = admin;  // provisorio en memoria, no se guarda como manual
+      else c._adminAuto = "";
+    }
+  });
+
+  // Ordenar según lo elegido, con prioridad SIEMPRE arriba
+  const ordenar = (arr) => {
+    const a = arr.slice();
+    const cmp = (x,y) => {
+      if(COBRANZA_ORDEN === "alfabetico") return (x.cliente||"").localeCompare(y.cliente||"","es");
+      if(COBRANZA_ORDEN === "monto") return (Number(y.importe)||0)-(Number(x.importe)||0);
+      return (x.fechaVto||"").localeCompare(y.fechaVto||""); // vencimiento (default)
+    };
+    a.sort((x,y) => {
+      // Prioridad manda por encima de todo
+      if(!!x.prioridad !== !!y.prioridad) return x.prioridad ? -1 : 1;
+      return cmp(x,y);
+    });
+    return a;
+  };
+
+  const cobranzas = APP.cobranzas.slice();
+
+  // Separar alertas, ocultas y el resto
+  const alertas = cobranzas.filter(c => c.estadoCruce === "alerta" && !c.oculta);
+  const ocultas = cobranzas.filter(c => c.oculta && c.estadoCruce !== "confirmada" && c.estadoCruce !== "resuelta");
+  const enDeuda = cobranzas.filter(c => !c.oculta && c.estadoCruce !== "alerta" && c.estadoCruce !== "confirmada" && c.estadoCruce !== "resuelta");
+  const confirmadas = cobranzas.filter(c => c.estadoCruce === "confirmada" || c.estadoCruce === "resuelta");
+
+  // Totales (sobre lo que está en deuda real y visible)
+  const totalFacturado = enDeuda.reduce((a,c) => a + (Number(c.importe)||0), 0);
+  const totalCobrado = enDeuda.reduce((a,c) => a + (Number(c.montoCobrado)||0), 0);
+  const totalPendiente = totalFacturado - totalCobrado;
+
+  // --- Apartado de ALERTAS (arriba, bien visible) ---
+  let bloqueAlertas = "";
+  if(alertas.length){
+    const filasAlerta = alertas.map(c => `<tr>
+      <td style="padding:8px 12px;font-family:monospace;font-size:11px">${c.id}</td>
+      <td style="padding:8px 12px;font-size:12px"><strong>${c.cliente||"—"}</strong></td>
+      <td style="padding:8px 12px;font-family:monospace;font-size:11px;text-align:right">${fmtMoneda(c.importe||0)}</td>
+      <td style="padding:8px 12px;font-size:10px;color:var(--text3);max-width:200px">${c.descripcion||""}</td>
+      <td style="padding:8px 12px;white-space:nowrap;text-align:right">
+        <button class="btn btn-sm" onclick="abrirCobro('${c.id}')">Cobrar</button>
+        <button class="btn btn-sm" onclick="resolverAlerta('${c.id}')" style="color:var(--text2)">Resolver sin cobrar</button>
+      </td>
+    </tr>`).join("");
+    bloqueAlertas = `<div class="card" style="border:1.5px solid var(--red-txt);margin-bottom:16px">
+      <div class="card-header" style="background:var(--red-bg)">
+        <h3 style="color:var(--red-txt)">⚠️ ${alertas.length} factura(s) para revisar</h3>
+        <span style="font-size:11px;color:var(--red-txt)">Salieron de Xubio sin registrarse como cobradas</span>
+      </div>
+      <div style="padding:0 0 4px">
+        <div style="font-size:11px;color:var(--text2);padding:10px 16px">
+          Estas facturas ya no aparecen en la deuda de Xubio, pero nunca las marcaste como cobradas.
+          Pueden ser cobros que no registraste, o facturas que se dieron de baja. Revisá cada una.
+        </div>
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr style="background:var(--surface2)">
+            <th style="text-align:left;padding:6px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">N° Factura</th>
+            <th style="text-align:left;padding:6px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Cliente</th>
+            <th style="text-align:right;padding:6px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Importe</th>
+            <th style="text-align:left;padding:6px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Descripción</th>
+            <th style="padding:6px 12px"></th>
+          </tr></thead>
+          <tbody>${filasAlerta}</tbody>
+        </table>
+      </div>
+    </div>`;
+  }
+
+  // --- Apartado de OCULTAS (plegable, arriba) ---
+  let bloqueOcultas = "";
+  if(ocultas.length){
+    const filasOcultas = ocultas.map(c => `<tr>
+      <td style="padding:6px 12px;font-family:monospace;font-size:11px">${c.id}</td>
+      <td style="padding:6px 12px;font-size:12px">${c.cliente||"—"}</td>
+      <td style="padding:6px 12px;font-size:11px;color:var(--text3)">${adminEfectivo(c)}</td>
+      <td style="padding:6px 12px;font-family:monospace;font-size:11px;text-align:right">${fmtMoneda(c.importe||0)}</td>
+      <td style="padding:6px 12px;text-align:right"><button class="btn btn-sm" onclick="mostrarCobranza('${c.id}')">Mostrar</button></td>
+    </tr>`).join("");
+    bloqueOcultas = `<details style="margin-bottom:16px">
+      <summary style="cursor:pointer;padding:10px 14px;background:var(--surface2);border-radius:var(--radius);font-size:13px;font-weight:500">
+        🙈 ${ocultas.length} factura(s) oculta(s) — clic para ver
+      </summary>
+      <div class="card" style="margin-top:8px">
+        <div style="padding:8px 14px;font-size:11px;color:var(--text2)">Estas facturas están ocultas de la lista principal. No suman en los totales. Podés volver a mostrarlas cuando quieras.</div>
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr style="background:var(--surface2)">
+            <th style="text-align:left;padding:6px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">N° Factura</th>
+            <th style="text-align:left;padding:6px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Cliente</th>
+            <th style="text-align:left;padding:6px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Administración</th>
+            <th style="text-align:right;padding:6px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Importe</th>
+            <th style="padding:6px 12px"></th>
+          </tr></thead>
+          <tbody>${filasOcultas}</tbody>
+        </table>
+        <div style="padding:10px 14px"><button class="btn btn-sm" onclick="mostrarTodasCobranzas()">Mostrar todas</button></div>
+      </div>
+    </details>`;
+  }
+
+  const filaCobranza = (c) => {
+    const tv = tiempoVencido(c.fechaVto);
+    const imp = Number(c.importe)||0;
+    const cob = Number(c.montoCobrado)||0;
+    const saldo = imp - cob;
+    let estadoPago;
+    if(c.estadoCruce === "transito") estadoPago = `<span style="background:var(--blue-bg);color:var(--blue-txt);font-size:10px;padding:2px 8px;border-radius:20px">En tránsito</span><br><span style="font-size:9px;color:var(--text3)">cobrado en app, falta marcar en Xubio</span>`;
+    else if(saldo <= 0 && imp > 0) estadoPago = `<span style="background:var(--green-bg);color:var(--green-txt);font-size:10px;padding:2px 8px;border-radius:20px">Cobrado</span>`;
+    else if(cob > 0) estadoPago = `<span style="background:var(--amber-bg);color:var(--amber-txt);font-size:10px;padding:2px 8px;border-radius:20px">Parcial</span><br><span style="font-size:10px;color:var(--text3)">falta ${fmtMoneda(saldo)}</span>`;
+    else estadoPago = `<span style="color:var(--text3);font-size:11px">Pendiente</span>`;
+
+    return `<tr style="${saldo<=0&&imp>0?'opacity:0.6':''}${c.prioridad?'background:var(--amber-bg)':''}">
+      <td style="padding:8px 12px;font-family:monospace;font-size:11px">${c.prioridad?'⭐ ':''}${(c.fechaEmision||"").split("-").reverse().join("/")}</td>
+      <td style="padding:8px 12px;font-family:monospace;font-size:10px;color:var(--text2)">${c.id}</td>
+      <td style="padding:8px 12px;font-family:monospace;font-size:11px">${(c.fechaVto||"").split("-").reverse().join("/")}</td>
+      <td style="padding:8px 12px;font-size:12px"><strong>${c.cliente||"—"}</strong></td>
+      <td style="padding:8px 12px;font-size:11px;color:var(--text3)">${
+        c.administracion&&c.administracion.trim()
+          ? c.administracion
+          : (c._adminAuto ? `<span style="color:var(--text2)">${c._adminAuto}</span> <span style="font-size:9px;color:var(--blue-txt)">auto</span>`
+             : `<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" onclick="asignarAdminFactura('${c.id}')">asignar</button>`)
+      }</td>
+      <td style="padding:8px 12px;font-family:monospace;font-size:11px;text-align:right">${fmtMoneda(imp)}${c.importe2&&c.importe2!==c.importe?`<br><span style="color:var(--amber-txt);font-size:10px">alt: ${fmtMoneda(c.importe2)}</span>`:""}</td>
+      <td style="padding:8px 12px;font-size:10px;color:var(--text3);max-width:160px">${c.descripcion||""}</td>
+      <td style="padding:8px 12px;text-align:center">${estadoPago}</td>
+      <td style="padding:8px 12px;font-size:11px;text-align:right;color:${tv.vencido&&saldo>0?'var(--red-txt)':'var(--text2)'}">${saldo>0?tv.texto:"—"}</td>
+      <td style="padding:8px 12px;text-align:center;white-space:nowrap">
+        <button class="btn btn-sm" onclick="togglePrioridad('${c.id}')" title="${c.prioridad?'Quitar prioridad':'Marcar prioridad'}" style="font-size:12px;padding:3px 6px">${c.prioridad?'⭐':'☆'}</button>
+        <button class="btn btn-sm" onclick="ocultarCobranza('${c.id}')" title="Ocultar" style="font-size:11px;padding:3px 6px">🙈</button>
+        <button class="btn btn-sm" onclick="abrirCobro('${c.id}')" style="font-size:11px;padding:3px 8px">Registrar</button>
+      </td>
+    </tr>`;
+  };
+
+  // Construir el cuerpo de la tabla según el orden
+  let cuerpoTabla;
+  if(COBRANZA_ORDEN === "admin"){
+    // Agrupado por administrador
+    const grupos = {};
+    enDeuda.forEach(c => {
+      const k = adminEfectivo(c);
+      if(!grupos[k]) grupos[k] = { nombre:k, facturas:[], pendiente:0 };
+      grupos[k].facturas.push(c);
+      grupos[k].pendiente += (Number(c.importe)||0) - (Number(c.montoCobrado)||0);
+    });
+    const ordenados = Object.values(grupos).sort((a,b)=>{
+      if(a.nombre==="Sin administración") return 1;
+      if(b.nombre==="Sin administración") return -1;
+      return a.nombre.localeCompare(b.nombre,"es");
+    });
+    cuerpoTabla = ordenados.map(g => {
+      const filasG = ordenar(g.facturas).map(filaCobranza).join("");
+      return `<tr style="background:var(--surface2)">
+        <td colspan="6" style="padding:8px 12px;font-weight:600;font-size:12px">${g.nombre}</td>
+        <td colspan="4" style="padding:8px 12px;text-align:right;font-size:11px;color:var(--text2)">
+          ${g.facturas.length} factura(s) · pendiente ${fmtMoneda(g.pendiente)}</td>
+      </tr>${filasG}`;
+    }).join("");
+  } else {
+    cuerpoTabla = ordenar(enDeuda).map(filaCobranza).join("");
+  }
+  const filas = cuerpoTabla;
+
+  return `${bloqueAlertas}${bloqueOcultas}<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px">
+      <div style="display:flex;gap:12px">
+        <div class="card" style="margin:0;padding:14px 20px;min-width:180px">
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px">Deuda pendiente</div>
+          <div style="font-size:30px;font-weight:600;color:var(--red-txt);line-height:1.2">${fmtMoneda(totalPendiente)}</div>
+        </div>
+        <div class="card" style="margin:0;padding:14px 20px;min-width:150px">
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px">Cobrado</div>
+          <div style="font-size:30px;font-weight:600;color:var(--green-txt);line-height:1.2">${fmtMoneda(totalCobrado)}</div>
+        </div>
+        <div class="card" style="margin:0;padding:14px 20px;min-width:130px">
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px">Facturas</div>
+          <div style="font-size:30px;font-weight:600;line-height:1.2">${enDeuda.length}</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <input type="file" id="xubio-file" accept=".xlsx,.xls" style="display:none" onchange="procesarExcelXubio(this)">
+        <button class="btn btn-primary" onclick="document.getElementById('xubio-file').click()">📥 Subir Excel de Xubio</button>
+      </div>
+    </div>
+    <div id="cobranza-status" style="font-size:12px;color:var(--text2);margin-bottom:12px"></div>
+    <div class="card"><div class="card-header"><h3>Cuentas a cobrar</h3>
+      <div style="display:flex;align-items:center;gap:10px">
+        ${confirmadas.length?`<span style="font-size:11px;color:var(--text3)">${confirmadas.length} confirmada(s) archivada(s)</span>`:""}
+        <span style="font-size:11px;color:var(--text3)">Ordenar:</span>
+        <select onchange="COBRANZA_ORDEN=this.value;render()" style="padding:5px 10px;border:1px solid var(--border2);border-radius:var(--radius);font-size:12px">
+          <option value="vencimiento" ${COBRANZA_ORDEN==="vencimiento"?"selected":""}>Por vencimiento</option>
+          <option value="alfabetico" ${COBRANZA_ORDEN==="alfabetico"?"selected":""}>Alfabético (cliente)</option>
+          <option value="monto" ${COBRANZA_ORDEN==="monto"?"selected":""}>Mayor monto primero</option>
+          <option value="admin" ${COBRANZA_ORDEN==="admin"?"selected":""}>Por administración</option>
+        </select>
+      </div></div>
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
+      <thead><tr style="background:var(--surface2)">
+        <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Emisión</th>
+        <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">N° Factura</th>
+        <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Vencimiento</th>
+        <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Cliente</th>
+        <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Administración</th>
+        <th style="text-align:right;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Importe</th>
+        <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Descripción</th>
+        <th style="text-align:center;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Pago</th>
+        <th style="text-align:right;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Vencido</th>
+        <th style="padding:8px 12px"></th>
+      </tr></thead>
+      <tbody>${filas || `<tr><td colspan="10" style="text-align:center;padding:32px;color:var(--text3)">No hay facturas en deuda. Subí el Excel de Xubio para empezar.</td></tr>`}</tbody>
+    </table></div></div>`;
+}
+
+// Resolver una alerta sin cobrarla (se dio de baja, era un error, etc.)
+function resolverAlerta(id){
+  const c = APP.cobranzas.find(x => x.id === id);
+  if(!c) return;
+  const motivo = prompt(`Resolver la factura ${c.id} de ${c.cliente} sin cobrarla.\n\n¿Motivo? (opcional)`, "");
+  if(motivo === null) return; // canceló
+  APP.cobranzas = APP.cobranzas.map(x => x.id===id ? {...x, estadoCruce:"resuelta", obs:motivo} : x);
+  guardarLocal();
+  driveSaveCobranza(id);
+  render();
+}
+
+// Asignar administrador a mano a una factura que no matcheó por razón social
+function asignarAdminFactura(id){
+  const c = APP.cobranzas.find(x => x.id === id);
+  if(!c) return;
+  // Lista de administradores existentes (de los servicios) para elegir
+  const admins = [...new Set(APP.servicios.map(s => (s.contacto||"").trim()).filter(Boolean))].sort();
+  const modal = document.getElementById("modal");
+  modal.innerHTML = `
+    <div class="modal-backdrop" onclick="cerrarModal()"></div>
+    <div class="modal-box">
+      <div class="modal-title">Asignar administración</div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:14px">
+        <strong>${c.cliente}</strong><br>
+        <span style="color:var(--text3)">Factura ${c.id}</span><br><br>
+        No se encontró un servicio con esa razón social. Asigná la administración a mano.
+      </div>
+      <div class="modal-field"><label>Elegí un administrador existente</label>
+        <select id="admin-select" onchange="document.getElementById('admin-manual').value=this.value">
+          <option value="">— Elegí —</option>
+          ${admins.map(a=>`<option value="${a}">${a}</option>`).join("")}
+        </select>
+      </div>
+      <div class="modal-field"><label>O escribilo</label>
+        <input id="admin-manual" type="text" placeholder="Nombre de la administración" value="${c.administracion||""}">
+      </div>
+      <div class="modal-actions">
+        <button class="btn" onclick="cerrarModal()">Cancelar</button>
+        <button class="btn btn-primary" onclick="guardarAdminFactura('${id}')">Guardar</button>
+      </div>
+    </div>`;
+  modal.style.display = "flex";
+}
+
+function guardarAdminFactura(id){
+  const val = document.getElementById("admin-manual").value.trim();
+  if(!val){ alert("Elegí o escribí una administración"); return; }
+  APP.cobranzas = APP.cobranzas.map(x => x.id===id ? {...x, administracion:val} : x);
+  guardarLocal();
+  driveSaveCobranza(id);
+  cerrarModal();
+  render();
+}
+
+// Ocultar / mostrar facturas (persistente)
+function ocultarCobranza(id){
+  APP.cobranzas = APP.cobranzas.map(x => x.id===id ? {...x, oculta:true} : x);
+  guardarLocal();
+  driveSaveCobranza(id);
+  render();
+}
+function mostrarCobranza(id){
+  APP.cobranzas = APP.cobranzas.map(x => x.id===id ? {...x, oculta:false} : x);
+  guardarLocal();
+  driveSaveCobranza(id);
+  render();
+}
+function mostrarTodasCobranzas(){
+  const ocultas = APP.cobranzas.filter(x => x.oculta);
+  APP.cobranzas = APP.cobranzas.map(x => x.oculta ? {...x, oculta:false} : x);
+  guardarLocal();
+  render();
+  // Guardar en Drive las que estaban ocultas
+  ocultas.forEach(o => driveSaveCobranza(o.id));
+}
+
+// Marcar / desmarcar prioridad (persistente)
+function togglePrioridad(id){
+  const c = APP.cobranzas.find(x => x.id===id);
+  if(!c) return;
+  APP.cobranzas = APP.cobranzas.map(x => x.id===id ? {...x, prioridad:!x.prioridad} : x);
+  guardarLocal();
+  driveSaveCobranza(id);
+  render();
+}
+
+// Modal de registro de cobro (total o parcial)
+function abrirCobro(id){
+  const c = APP.cobranzas.find(x => x.id === id);
+  if(!c) return;
+  const imp = Number(c.importe)||0;
+  const cobrado = Number(c.montoCobrado)||0;
+  const saldo = imp - cobrado;
+  const modal = document.getElementById("modal");
+  modal.innerHTML = `
+    <div class="modal-backdrop" onclick="cerrarModal()"></div>
+    <div class="modal-box">
+      <div class="modal-title">Registrar cobro</div>
+      <div style="background:var(--surface2);border-radius:var(--radius);padding:12px;margin-bottom:16px;font-size:12px">
+        <div style="margin-bottom:4px"><strong>${c.cliente}</strong></div>
+        <div style="color:var(--text2)">Factura ${c.id}</div>
+        <div style="display:flex;justify-content:space-between;margin-top:8px">
+          <span style="color:var(--text2)">Importe total:</span><span style="font-family:monospace">${fmtMoneda(imp)}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between">
+          <span style="color:var(--text2)">Ya cobrado:</span><span style="font-family:monospace">${fmtMoneda(cobrado)}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-weight:600;border-top:0.5px solid var(--border);margin-top:6px;padding-top:6px">
+          <span>Saldo:</span><span style="font-family:monospace;color:${saldo>0?'var(--red-txt)':'var(--green-txt)'}">${fmtMoneda(saldo)}</span>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:14px">
+        <button class="btn" onclick="cobroTotal('${id}')" style="flex:1;justify-content:center">Cobrar todo (${fmtMoneda(saldo)})</button>
+      </div>
+      <div class="modal-field"><label>O registrar monto parcial</label>
+        <input id="cobro-monto" type="number" placeholder="0" value="" style="width:100%;padding:9px 12px;border:1px solid var(--border2);border-radius:var(--radius);font-size:13px">
+        <div style="font-size:11px;color:var(--text3);margin-top:4px">Se suma a lo ya cobrado. Útil cuando pagan parte y queda una retención pendiente.</div>
+      </div>
+      ${cobrado>0?`<div style="margin-bottom:14px"><button class="btn btn-sm" onclick="resetCobro('${id}')" style="color:var(--red-txt);font-size:11px">Deshacer cobros de esta factura</button></div>`:""}
+      <div class="modal-actions">
+        <button class="btn" onclick="cerrarModal()">Cerrar</button>
+        <button class="btn btn-primary" onclick="guardarCobroParcial('${id}')">Guardar parcial</button>
+      </div>
+    </div>`;
+  modal.style.display = "flex";
+}
+
+function cobroTotal(id){
+  const c = APP.cobranzas.find(x => x.id === id);
+  if(!c) return;
+  const imp = Number(c.importe)||0;
+  APP.cobranzas = APP.cobranzas.map(x => x.id===id ? {...x, montoCobrado:imp, cobrado:true} : x);
+  guardarLocal();
+  driveSaveCobranza(id);
+  cerrarModal();
+  render();
+}
+
+function guardarCobroParcial(id){
+  const monto = parseFloat(document.getElementById("cobro-monto").value)||0;
+  if(monto <= 0){ alert("Ingresá un monto mayor a cero"); return; }
+  const c = APP.cobranzas.find(x => x.id === id);
+  if(!c) return;
+  const imp = Number(c.importe)||0;
+  const nuevoCobrado = (Number(c.montoCobrado)||0) + monto;
+  if(nuevoCobrado > imp && !confirm(`El cobro (${fmtMoneda(nuevoCobrado)}) supera el importe de la factura (${fmtMoneda(imp)}). ¿Guardar igual?`)) return;
+  APP.cobranzas = APP.cobranzas.map(x => x.id===id ? {...x, montoCobrado:nuevoCobrado, cobrado:nuevoCobrado>=imp} : x);
+  guardarLocal();
+  driveSaveCobranza(id);
+  cerrarModal();
+  render();
+}
+
+function resetCobro(id){
+  if(!confirm("¿Deshacer todos los cobros de esta factura? Vuelve a quedar pendiente.")) return;
+  APP.cobranzas = APP.cobranzas.map(x => x.id===id ? {...x, montoCobrado:0, cobrado:false} : x);
+  guardarLocal();
+  driveSaveCobranza(id);
+  cerrarModal();
+  render();
+}
+
+// Lee el Excel de Xubio y carga las facturas
+async function procesarExcelXubio(input){
+  if(!input.files.length) return;
+  const status = document.getElementById("cobranza-status");
+  status.textContent = "Leyendo archivo...";
+  try{
+    const file = input.files[0];
+    const data = await file.arrayBuffer();
+    const wb = XLSX.read(data, { cellDates:true });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const filas = XLSX.utils.sheet_to_json(ws, { header:1 });
+
+    // Buscar la fila de headers (la que tiene "Documento" o "Cliente")
+    let headerRow = 0;
+    for(let i=0; i<Math.min(5, filas.length); i++){
+      const row = filas[i].map(x => String(x||"").toLowerCase());
+      if(row.some(x => x.includes("documento")) || row.some(x => x.includes("cliente"))){ headerRow = i; break; }
+    }
+    const headers = filas[headerRow].map(x => String(x||"").trim().toLowerCase());
+    const col = (busca) => headers.findIndex(h => h.includes(busca));
+    const iFecha = col("fecha"), iVto = headers.findIndex(h=>h.includes("vto")||h.includes("vencimiento")&&h.includes("fecha"));
+    const iDoc = col("documento"), iCli = col("cliente");
+    const iImp1 = headers.findIndex(h=>h.includes("transacc")), iImp2 = headers.findIndex(h=>h.includes("ppal"));
+    const iDesc = col("descripción")>=0?col("descripción"):col("descripcion");
+
+    // Fecha emisión: primera col "fecha" que no sea la de vto
+    const iFechaEmision = headers.findIndex((h,idx)=>h.includes("fecha") && idx!==iVto);
+
+    const nuevas = [];
+    for(let i=headerRow+1; i<filas.length; i++){
+      const row = filas[i];
+      if(!row || !row.length) continue;
+      const numFactura = String(row[iDoc]||"").trim();
+      if(!numFactura) continue;
+      const imp1 = Number(row[iImp1])||0;
+      const imp2 = iImp2>=0 ? (Number(row[iImp2])||0) : imp1;
+      nuevas.push({
+        id: numFactura,                      // el número de factura es la llave única
+        fechaEmision: fechaExcel(row[iFechaEmision>=0?iFechaEmision:iFecha]),
+        fechaVto: fechaExcel(row[iVto]),
+        cliente: String(row[iCli]||"").trim(),
+        administracion: "",                  // el match se resuelve después
+        importe: imp1,
+        importe2: imp2,
+        descripcion: String(row[iDesc]||"").trim(),
+        cobrado: false,
+        montoCobrado: 0,
+        estadoCruce: "pendiente",  // pendiente | transito | confirmada | alerta | resuelta
+        oculta: false,
+        prioridad: false,
+      });
+    }
+
+    if(!nuevas.length){ status.textContent = "⚠️ No se encontraron facturas en el archivo. Revisá el formato."; input.value=""; return; }
+
+    // ========================================================
+    // CRUCE: comparar lo viejo con lo nuevo, sin perder nada
+    // ========================================================
+    const numerosNuevos = new Set(nuevas.map(n => String(n.id)));
+    const viejasPorId = {};
+    APP.cobranzas.forEach(c => { viejasPorId[String(c.id)] = c; });
+
+    // 1) Facturas del Excel nuevo: preservar cobros previos y calcular estado
+    nuevas.forEach(n => {
+      const vieja = viejasPorId[String(n.id)];
+      if(vieja){
+        n.cobrado = vieja.cobrado || false;
+        n.montoCobrado = Number(vieja.montoCobrado) || 0;
+        n.administracion = vieja.administracion || "";  // preservar match manual si lo hubo
+        n.oculta = vieja.oculta || false;              // preservar ocultamiento
+        n.prioridad = vieja.prioridad || false;        // preservar prioridad
+      }
+      const imp = Number(n.importe)||0;
+      const cob = Number(n.montoCobrado)||0;
+      // Está en Xubio (sigue en la deuda). Si la marcaste cobrada → en tránsito.
+      if(cob > 0 && cob >= imp) n.estadoCruce = "transito";  // pagada en app, Xubio todavía la muestra
+      else n.estadoCruce = "pendiente";
+    });
+
+    // 2) Facturas que estaban antes y YA NO están en el Excel nuevo (desaparecieron de Xubio)
+    const desaparecidas = [];
+    APP.cobranzas.forEach(c => {
+      if(numerosNuevos.has(String(c.id))) return;       // sigue en Xubio, ya la procesamos arriba
+      if(c.estadoCruce === "resuelta") { desaparecidas.push(c); return; } // ya resuelta antes, se mantiene
+      const imp = Number(c.importe)||0;
+      const cob = Number(c.montoCobrado)||0;
+      if(cob >= imp && imp > 0){
+        // Estaba cobrada y ya no está en Xubio → cobro confirmado, cerró bien
+        desaparecidas.push({ ...c, estadoCruce: "confirmada" });
+      } else {
+        // Desapareció de Xubio pero NO estaba cobrada → ALERTA
+        desaparecidas.push({ ...c, estadoCruce: "alerta" });
+      }
+    });
+
+    const todas = [...nuevas, ...desaparecidas];
+
+    // Detectar solo las que cambiaron respecto a lo que ya había (para no reescribir 100 iguales)
+    const cambiadas = todas.filter(f => {
+      const vieja = viejasPorId[String(f.id)];
+      if(!vieja) return true; // nueva
+      // Comparar los campos que importan
+      return vieja.fechaEmision !== f.fechaEmision ||
+             vieja.fechaVto !== f.fechaVto ||
+             (Number(vieja.importe)||0) !== (Number(f.importe)||0) ||
+             (Number(vieja.montoCobrado)||0) !== (Number(f.montoCobrado)||0) ||
+             (vieja.cobrado||false) !== (f.cobrado||false) ||
+             (vieja.estadoCruce||"pendiente") !== (f.estadoCruce||"pendiente") ||
+             (vieja.cliente||"") !== (f.cliente||"") ||
+             (vieja.administracion||"") !== (f.administracion||"");
+    });
+
+    APP.cobranzas = todas;
+    guardarLocal();
+    render();
+    const nAlertas = desaparecidas.filter(d => d.estadoCruce==="alerta").length;
+    if(!cambiadas.length){
+      document.getElementById("cobranza-status").textContent = `✅ ${nuevas.length} factura(s) · sin cambios respecto a lo guardado (no se reescribió nada)`;
+    } else {
+      status.textContent = `✅ ${nuevas.length} en deuda${nAlertas?` · ⚠️ ${nAlertas} alerta(s)`:""}. Guardando ${cambiadas.length} cambio(s)...`;
+      const r = await driveSaveCobranzasBulk(cambiadas);
+      document.getElementById("cobranza-status").textContent = `✅ ${nuevas.length} en deuda · ${desaparecidas.filter(d=>d.estadoCruce==="confirmada").length} confirmada(s) · ${nAlertas} alerta(s) · ${r.ok} guardada(s)`;
+    }
+  }catch(e){
+    console.error(e);
+    status.textContent = "❌ Error al leer el archivo: " + e.message;
+  }
+  input.value = "";
+}
+
 function renderConfig(){
   return `
     <div class="card"><div class="card-header"><h3>📥 Importar servicios desde backup</h3></div>
@@ -2501,6 +3144,7 @@ const RENDERERS = {
   control: renderControl,
   movimientos: renderMovimientos,
   prefac: renderPrefac,
+  cobranzas: renderCobranzas,
   reclamos: renderReclamos,
   comercial: renderComercial,
   "comercial-bajas": renderComercialBajas,
@@ -2596,8 +3240,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   cargarLocal();       // primero lo local (rápido)
   restaurarSesion();
   render();
-  // Después intentar traer lo último de Drive
-  if(driveActivo()){
+  // Solo traer de Drive si ya hay sesión activa (sesión restaurada).
+  // Si está en la pantalla de login, la carga espera a que ingrese
+  // para no pisar el usuario/contraseña que está tipeando.
+  if(driveActivo() && APP.auth.perfil){
     const ok = await cargarDeDrive();
     if(ok) render();
   }
