@@ -2445,13 +2445,22 @@ function mailDeFactura(c){
   return "";
 }
 
-// Número de factura corto para mostrar: saca prefijos tipo "Factura de Venta N° "
-// y deja solo el código (A-00010-00001173). El id completo NO se toca (es la llave del match).
+// Número de factura corto para mostrar: LETRA (A/B) + últimos 5 números.
+// Ej: "Factura de Venta N° A-00010-00001173" → "A-01173".
+// El id completo NO se toca (es la llave del match).
 function numeroCorto(id){
   const s = String(id||"").trim();
-  // Buscar un patrón tipo LETRA-digitos-digitos y devolver desde ahí
-  const m = s.match(/[A-Z]?-?\d{3,}-\d{3,}/i) || s.match(/\d{4,}/);
-  return m ? m[0] : s;
+  // Letra de comprobante (A, B, C, E, M...) — la que está antes del primer guión con números
+  const mLetra = s.match(/\b([A-Z])\s*-\s*\d/i);
+  const letra = mLetra ? mLetra[1].toUpperCase() : "";
+  // Último bloque largo de dígitos (la numeración de la factura)
+  const bloques = s.match(/\d{3,}/g);
+  if(bloques && bloques.length){
+    const ult = bloques[bloques.length - 1];
+    const cinco = ult.slice(-5);
+    return letra ? `${letra}-${cinco}` : cinco;
+  }
+  return s;
 }
 
 let COBRANZA_ORDEN = "vencimiento"; // vencimiento | alfabetico | monto | admin
