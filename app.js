@@ -25,6 +25,7 @@ const APP = {
   movimientos: [],    // hoja 8
   reclamos: [],       // hoja 9  (reclamos de facturación)
   cobranzas: [],      // hoja 10 (facturas de Xubio + cobros)
+  precios: [],        // hoja 11 (lista de precios: valores sin IVA)
 
   // --- Auth ---
   auth: {
@@ -34,7 +35,7 @@ const APP = {
   },
 
   // --- Contadores de ID (para prefijos únicos) ---
-  contadores: { S: 0, O: 0, P: 0, M: 0, R: 0 },
+  contadores: { S: 0, O: 0, P: 0, M: 0, R: 0, V: 0 },
 };
 
 // ============================================================
@@ -50,11 +51,11 @@ const USUARIOS_LOGIN = {
 
 const PERMISOS = {
   rrhh: {
-    screens: ["servicios","bajas","operarios","personal","distribucion","control","movimientos","prefac","cobranzas","reclamos","config"],
+    screens: ["servicios","bajas","operarios","personal","distribucion","control","movimientos","prefac","cobranzas","precios","reclamos","config"],
     editar: true, verValores: true, verFacturacion: true, darBaja: true, configurar: true, verTodo: true,
   },
   facturacion: {
-    screens: ["servicios","prefac","cobranzas","movimientos","reclamos","comercial","comercial-bajas"],
+    screens: ["servicios","prefac","cobranzas","precios","movimientos","reclamos","comercial","comercial-bajas"],
     editar: false, verValores: true, verFacturacion: true, darBaja: false, configurar: false, verTodo: true,
   },
   jefe: {
@@ -104,6 +105,7 @@ function guardarLocal(){
       movimientos: APP.movimientos,
       reclamos: APP.reclamos,
       cobranzas: APP.cobranzas,
+      precios: APP.precios,
       contadores: APP.contadores,
     }));
   }catch(e){ console.error("Error guardando local:", e); }
@@ -122,6 +124,7 @@ function cargarLocal(){
     APP.movimientos  = d.movimientos  || [];
     APP.reclamos     = d.reclamos     || [];
     APP.cobranzas    = d.cobranzas    || [];
+    APP.precios      = d.precios      || [];
     APP.contadores   = d.contadores   || { S:0, O:0, P:0, M:0, R:0 };
     return true;
   }catch(e){ console.error("Error cargando local:", e); return false; }
@@ -143,6 +146,7 @@ async function cargarDeDrive(){
       APP.movimientos  = (data.movimientos || []).map(normalizarMovimiento);
       APP.reclamos     = data.reclamos || [];
       APP.cobranzas    = (data.cobranzas || []).map(normalizarCobranza);
+      APP.precios      = data.precios || [];
       // Recalcular contadores desde los IDs existentes (para no repetir)
       recalcularContadores();
       guardarLocal();
@@ -170,6 +174,7 @@ function recalcularContadores(){
     P: maxId(APP.supervisores, "P"),
     M: maxId(APP.movimientos, "M"),
     R: maxId(APP.reclamos, "R"),
+    V: maxId(APP.precios, "V"),
   };
 }
 
@@ -278,6 +283,22 @@ async function driveDeleteCobranza(id){
   }catch(e){ console.error(e); }
 }
 
+async function driveSavePrecio(id){
+  if(!driveActivo()) return;
+  const p = APP.precios.find(x => x.id === id);
+  if(!p) return;
+  try{
+    await fetch(SCRIPT_URL, { method:"POST", body: JSON.stringify({ action:"upsertPrecio", precio:p })});
+  }catch(e){ console.error(e); }
+}
+
+async function driveDeletePrecio(id){
+  if(!driveActivo()) return;
+  try{
+    await fetch(SCRIPT_URL, { method:"POST", body: JSON.stringify({ action:"deletePrecio", id:id })});
+  }catch(e){ console.error(e); }
+}
+
 // ============================================================
 // AUTH
 // ============================================================
@@ -348,6 +369,7 @@ const SCREENS = {
   movimientos:  { titulo: "Movimientos",      icono: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" },
   prefac:       { titulo: "Prefacturación",   icono: "M9 7h6m-6 4h6m-6 4h4m-8 4h12a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z" },
   cobranzas:    { titulo: "Cobranzas",        icono: "M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" },
+  precios:      { titulo: "Lista de precios", icono: "M7 7h.01M7 3h5a1.99 1.99 0 011.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.99 1.99 0 013 12V7a4 4 0 014-4z" },
   reclamos:     { titulo: "Reclamos",         icono: "M12 9v2m0 4h.01M5 19h14a2 2 0 001.84-2.75L13.74 4a2 2 0 00-3.5 0L3.16 16.25A2 2 0 005 19z" },
   comercial:    { titulo: "Comercial",        icono: "M3 3v18h18M18 17V9M13 17V5M8 17v-3" },
   bajas:        { titulo: "Bajas",             icono: "M18 6L6 18M6 6l12 12" },
@@ -358,7 +380,7 @@ const SCREENS = {
 const NAV_GROUPS = [
   { label: "Operaciones", items: ["servicios","bajas","distribucion","control"] },
   { label: "Personal",    items: ["operarios","personal"] },
-  { label: "Gestión",     items: ["movimientos","prefac","cobranzas","reclamos"] },
+  { label: "Gestión",     items: ["movimientos","prefac","cobranzas","precios","reclamos"] },
   { label: "Comercial",   items: ["comercial","comercial-bajas"] },
   { label: "Sistema",     items: ["config"] },
 ];
@@ -2662,7 +2684,8 @@ function renderCobranzas(){
         </div>
       </div>
       <div style="display:flex;gap:8px">
-        <button class="btn" onclick="copiarMailsCobranza()">✉️ Copiar mails</button>
+        <button class="btn" onclick="copiarMailsCobranza(false)">✉️ Copiar mails</button>
+        <button class="btn" onclick="copiarMailsCobranza(true)">⭐ Copiar mails prioritarios</button>
         <input type="file" id="xubio-file" accept=".xlsx,.xls" style="display:none" onchange="procesarExcelXubio(this)">
         <button class="btn btn-primary" onclick="document.getElementById('xubio-file').click()">📥 Subir Excel de Xubio</button>
       </div>
@@ -2803,18 +2826,24 @@ function editarDetalleCobranza(id){
 }
 
 // Copiar los mails de las facturas visibles (según búsqueda/filtro actual)
-function copiarMailsCobranza(){
+function copiarMailsCobranza(soloPrioritarios){
   const q = COBRANZA_BUSQUEDA.trim().toLowerCase();
   const visibles = APP.cobranzas.filter(c =>
     !c.oculta && c.estadoCruce!=="alerta" && c.estadoCruce!=="confirmada" && c.estadoCruce!=="resuelta" &&
+    (!soloPrioritarios || c.prioridad) &&
     (!q || (c.cliente||"").toLowerCase().includes(q)));
   // Juntar mails únicos
   const mails = [...new Set(visibles.map(c => mailDeFactura(c)).filter(Boolean))];
-  if(!mails.length){ alert("No se encontraron mails para las facturas visibles.\n\n(El mail sale del servicio que matchea por razón social; si no hay match, no hay mail.)"); return; }
+  if(!mails.length){
+    alert(soloPrioritarios
+      ? "No hay mails en las facturas marcadas como prioritarias.\n\n(Marcá facturas con la estrella, o revisá que tengan match con un servicio para tener mail.)"
+      : "No se encontraron mails para las facturas visibles.\n\n(El mail sale del servicio que matchea por razón social; si no hay match, no hay mail.)");
+    return;
+  }
   const texto = mails.join(", ");
   navigator.clipboard.writeText(texto).then(() => {
     const st = document.getElementById("cobranza-status");
-    if(st) st.textContent = `✅ ${mails.length} mail(s) copiados al portapapeles. Pegalos en el "Para" de tu correo.`;
+    if(st) st.textContent = `✅ ${mails.length} mail(s)${soloPrioritarios?" de prioritarios":""} copiados al portapapeles. Pegalos en el "Para" de tu correo.`;
   }).catch(() => {
     // Fallback si el navegador no deja copiar
     prompt("Copiá estos mails:", texto);
@@ -3044,6 +3073,179 @@ async function procesarExcelXubio(input){
   input.value = "";
 }
 
+// ============================================================
+// LISTA DE PRECIOS — valores sin IVA, con coincidencias por servicio
+// ============================================================
+const IVA_PCT = 0.21;
+
+// Servicios que usan un valor neto exacto (match por el neto)
+function serviciosConValor(neto){
+  return APP.servicios.filter(s => {
+    if(s.estado !== "activo") return false;
+    const fac = facDe(s.id);
+    if((fac.tipoContrato||"horas") === "fijo") return false;
+    return Number(fac.valorHora) === Number(neto);
+  });
+}
+
+// Servicios activos por horas cuyo valor no coincide con ningún precio de la lista
+function serviciosFueraDeLista(){
+  const netosLista = new Set(APP.precios.map(p => Number(p.neto)));
+  return APP.servicios.filter(s => {
+    if(s.estado !== "activo") return false;
+    const fac = facDe(s.id);
+    if((fac.tipoContrato||"horas") === "fijo") return false;
+    const vh = Number(fac.valorHora) || 0;
+    if(vh <= 0) return false; // sin valor cargado, no cuenta como "fuera"
+    return !netosLista.has(vh);
+  });
+}
+
+let PRECIO_EXPANDIDO = null; // id del precio con la lista de servicios desplegada
+
+function renderPrecios(){
+  const precios = APP.precios.slice().sort((a,b) => (a.nombre||"").localeCompare(b.nombre||"","es"));
+  const fuera = serviciosFueraDeLista();
+
+  const filas = precios.map(p => {
+    const neto = Number(p.neto) || 0;
+    const iva = Math.round(neto * IVA_PCT);
+    const final = neto + iva;
+    const svcs = serviciosConValor(neto);
+    const expandido = PRECIO_EXPANDIDO === p.id;
+
+    let filaExpandida = "";
+    if(expandido && svcs.length){
+      const chips = svcs.map(s => `<span style="background:var(--surface2);border:0.5px solid var(--border);font-size:12px;padding:3px 9px;border-radius:20px;color:var(--text2)">${s.nombre}</span>`).join("");
+      filaExpandida = `<tr><td colspan="6" style="padding:4px 14px 12px;background:var(--surface2)">
+        <div style="font-size:10px;color:var(--text3);margin:6px 0 6px;text-transform:uppercase">Servicios con este valor</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">${chips}</div>
+      </td></tr>`;
+    }
+
+    return `<tr>
+      <td style="padding:12px 14px;font-weight:500">${p.nombre||"—"}</td>
+      <td style="padding:12px 14px;text-align:right;font-family:monospace">${fmtMoneda(neto)}</td>
+      <td style="padding:12px 14px;text-align:right;font-family:monospace;color:var(--text2)">${fmtMoneda(iva)}</td>
+      <td style="padding:12px 14px;text-align:right;font-family:monospace;font-weight:500">${fmtMoneda(final)}</td>
+      <td style="padding:12px 14px;text-align:right">${
+        svcs.length
+          ? `<button class="btn btn-sm" onclick="PRECIO_EXPANDIDO=${expandido?"null":`'${p.id}'`};render()" style="background:var(--primary-bg);color:var(--primary);border:none;font-size:12px">${svcs.length} servicio(s) ${expandido?"▲":"▼"}</button>`
+          : `<span style="font-size:12px;color:var(--text3)">sin uso</span>`
+      }</td>
+      <td style="padding:12px 14px;text-align:center;white-space:nowrap">
+        <button class="btn btn-sm" onclick="editarPrecio('${p.id}')">Editar</button>
+        <button class="btn btn-sm" onclick="eliminarPrecio('${p.id}')" style="color:var(--red-txt)">Borrar</button>
+      </td>
+    </tr>${filaExpandida}`;
+  }).join("");
+
+  // Bloque de servicios fuera de la lista
+  let bloqueFuera = "";
+  if(fuera.length){
+    const chips = fuera.map(s => {
+      const vh = Number(facDe(s.id).valorHora)||0;
+      return `<span style="background:var(--surface);border:0.5px solid var(--border);font-size:12px;padding:3px 9px;border-radius:20px;color:var(--text2)">${s.nombre} · ${fmtMoneda(vh)}</span>`;
+    }).join("");
+    bloqueFuera = `<div class="card" style="background:var(--amber-bg);border:0.5px solid var(--amber-txt);margin-top:16px">
+      <div style="padding:14px 16px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+          <span style="font-weight:500;color:var(--amber-txt)">⚠️ ${fuera.length} servicio(s) fuera de la lista</span>
+        </div>
+        <div style="font-size:12px;color:var(--amber-txt);margin-bottom:10px">Su valor hora no coincide con ningún precio de la lista. Revisá si es un precio distinto o un tema de redondeo.</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">${chips}</div>
+      </div>
+    </div>`;
+  }
+
+  return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <div style="font-size:12px;color:var(--text2)">Los valores se cargan sin IVA. El final se calcula solo.</div>
+      <button class="btn btn-primary" onclick="nuevoPrecio()">+ Nuevo valor</button>
+    </div>
+    <div class="card"><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
+      <thead><tr style="background:var(--surface2)">
+        <th style="text-align:left;padding:10px 14px;font-size:10px;color:var(--text3);text-transform:uppercase">Valor</th>
+        <th style="text-align:right;padding:10px 14px;font-size:10px;color:var(--text3);text-transform:uppercase">Neto</th>
+        <th style="text-align:right;padding:10px 14px;font-size:10px;color:var(--text3);text-transform:uppercase">IVA 21%</th>
+        <th style="text-align:right;padding:10px 14px;font-size:10px;color:var(--text3);text-transform:uppercase">Final</th>
+        <th style="text-align:right;padding:10px 14px;font-size:10px;color:var(--text3);text-transform:uppercase">En uso</th>
+        <th style="padding:10px 14px"></th>
+      </tr></thead>
+      <tbody>${filas || `<tr><td colspan="6" style="text-align:center;padding:32px;color:var(--text3)">No hay valores cargados. Creá el primero con "+ Nuevo valor".</td></tr>`}</tbody>
+    </table></div></div>
+    ${bloqueFuera}`;
+}
+
+function nuevoPrecio(){ abrirModalPrecio(null); }
+function editarPrecio(id){ abrirModalPrecio(id); }
+
+function abrirModalPrecio(id){
+  const p = id ? APP.precios.find(x => x.id === id) : null;
+  const modal = document.getElementById("modal");
+  const neto = p ? Number(p.neto)||0 : 0;
+  modal.innerHTML = `
+    <div class="modal-backdrop" onclick="cerrarModal()"></div>
+    <div class="modal-box">
+      <div class="modal-title">${p ? "Editar" : "Nuevo"} valor</div>
+      <div class="modal-field"><label>Nombre</label>
+        <input id="precio-nombre" type="text" value="${p?p.nombre:""}" placeholder="Ej: Hora maestranza"></div>
+      <div class="modal-field"><label>Valor neto (sin IVA)</label>
+        <input id="precio-neto" type="number" value="${neto||""}" placeholder="0" oninput="previewPrecio()"></div>
+      <div id="precio-preview" style="background:var(--surface2);border-radius:var(--radius);padding:12px;font-size:12px;margin-bottom:14px">
+        ${previewTextoPrecio(neto)}
+      </div>
+      <div class="modal-actions">
+        <button class="btn" onclick="cerrarModal()">Cancelar</button>
+        <button class="btn btn-primary" onclick="guardarPrecio('${id||""}')">${p?"Guardar":"Crear"}</button>
+      </div>
+    </div>`;
+  modal.style.display = "flex";
+}
+
+function previewTextoPrecio(neto){
+  neto = Number(neto)||0;
+  const iva = Math.round(neto * IVA_PCT);
+  const final = neto + iva;
+  return `<div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:var(--text2)">Neto:</span><span style="font-family:monospace">${fmtMoneda(neto)}</span></div>
+    <div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:var(--text2)">IVA 21%:</span><span style="font-family:monospace">${fmtMoneda(iva)}</span></div>
+    <div style="display:flex;justify-content:space-between;padding:4px 0;border-top:0.5px solid var(--border);margin-top:4px;font-weight:600"><span>Final:</span><span style="font-family:monospace">${fmtMoneda(final)}</span></div>`;
+}
+
+function previewPrecio(){
+  const neto = parseFloat(document.getElementById("precio-neto").value)||0;
+  const el = document.getElementById("precio-preview");
+  if(el) el.innerHTML = previewTextoPrecio(neto);
+}
+
+function guardarPrecio(id){
+  const nombre = document.getElementById("precio-nombre").value.trim();
+  const neto = parseFloat(document.getElementById("precio-neto").value)||0;
+  if(!nombre){ alert("Ingresá un nombre"); return; }
+  if(neto <= 0){ alert("Ingresá un valor neto mayor a cero"); return; }
+
+  let recId = id;
+  if(id){
+    APP.precios = APP.precios.map(p => p.id===id ? {...p, nombre, neto} : p);
+  } else {
+    recId = nuevoId("V");
+    APP.precios.push({ id:recId, nombre, neto });
+  }
+  guardarLocal();
+  driveSavePrecio(recId);
+  cerrarModal();
+  render();
+}
+
+function eliminarPrecio(id){
+  const p = APP.precios.find(x => x.id === id);
+  if(!p) return;
+  if(!confirm(`¿Borrar el valor "${p.nombre}"? No afecta a los servicios, solo lo saca de la lista.`)) return;
+  APP.precios = APP.precios.filter(x => x.id !== id);
+  guardarLocal();
+  driveDeletePrecio(id);
+  render();
+}
+
 function renderConfig(){
   return `
     <div class="card"><div class="card-header"><h3>📥 Importar servicios desde backup</h3></div>
@@ -3230,6 +3432,7 @@ const RENDERERS = {
   movimientos: renderMovimientos,
   prefac: renderPrefac,
   cobranzas: renderCobranzas,
+  precios: renderPrecios,
   reclamos: renderReclamos,
   comercial: renderComercial,
   "comercial-bajas": renderComercialBajas,
