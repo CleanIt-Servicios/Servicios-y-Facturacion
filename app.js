@@ -2662,7 +2662,8 @@ function renderCobranzas(){
         </div>
       </div>
       <div style="display:flex;gap:8px">
-        <button class="btn" onclick="copiarMailsCobranza()">✉️ Copiar mails</button>
+        <button class="btn" onclick="copiarMailsCobranza(false)">✉️ Copiar mails</button>
+        <button class="btn" onclick="copiarMailsCobranza(true)">⭐ Copiar mails prioritarios</button>
         <input type="file" id="xubio-file" accept=".xlsx,.xls" style="display:none" onchange="procesarExcelXubio(this)">
         <button class="btn btn-primary" onclick="document.getElementById('xubio-file').click()">📥 Subir Excel de Xubio</button>
       </div>
@@ -2803,18 +2804,24 @@ function editarDetalleCobranza(id){
 }
 
 // Copiar los mails de las facturas visibles (según búsqueda/filtro actual)
-function copiarMailsCobranza(){
+function copiarMailsCobranza(soloPrioritarios){
   const q = COBRANZA_BUSQUEDA.trim().toLowerCase();
   const visibles = APP.cobranzas.filter(c =>
     !c.oculta && c.estadoCruce!=="alerta" && c.estadoCruce!=="confirmada" && c.estadoCruce!=="resuelta" &&
+    (!soloPrioritarios || c.prioridad) &&
     (!q || (c.cliente||"").toLowerCase().includes(q)));
   // Juntar mails únicos
   const mails = [...new Set(visibles.map(c => mailDeFactura(c)).filter(Boolean))];
-  if(!mails.length){ alert("No se encontraron mails para las facturas visibles.\n\n(El mail sale del servicio que matchea por razón social; si no hay match, no hay mail.)"); return; }
+  if(!mails.length){
+    alert(soloPrioritarios
+      ? "No hay mails en las facturas marcadas como prioritarias.\n\n(Marcá facturas con la estrella, o revisá que tengan match con un servicio para tener mail.)"
+      : "No se encontraron mails para las facturas visibles.\n\n(El mail sale del servicio que matchea por razón social; si no hay match, no hay mail.)");
+    return;
+  }
   const texto = mails.join(", ");
   navigator.clipboard.writeText(texto).then(() => {
     const st = document.getElementById("cobranza-status");
-    if(st) st.textContent = `✅ ${mails.length} mail(s) copiados al portapapeles. Pegalos en el "Para" de tu correo.`;
+    if(st) st.textContent = `✅ ${mails.length} mail(s)${soloPrioritarios?" de prioritarios":""} copiados al portapapeles. Pegalos en el "Para" de tu correo.`;
   }).catch(() => {
     // Fallback si el navegador no deja copiar
     prompt("Copiá estos mails:", texto);
