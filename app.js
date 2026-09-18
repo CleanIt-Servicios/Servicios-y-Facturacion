@@ -445,6 +445,17 @@ function placeholder(titulo, desc, extra){
 function facDe(svcId){ return APP.facturacion.find(f => f.svcId === svcId) || {}; }
 function distDe(svcId){ return APP.distribucion.find(d => d.svcId === svcId) || { svcId, turnos:[] }; }
 
+// Valor hora REAL de un servicio: si está vinculado a un precio de la lista,
+// devuelve el precio actual de la lista (vínculo vivo). Si no, el valor propio.
+function valorHoraDe(svcId){
+  const fac = facDe(svcId);
+  if(fac.precioId){
+    const p = APP.precios.find(x => x.id === fac.precioId);
+    if(p) return Number(p.neto)||0;   // precio vivo de la lista
+  }
+  return Number(fac.valorHora)||0;    // valor propio (o precio borrado → cae al último guardado)
+}
+
 const DIAS_LETRA = ["Do","Lu","Ma","Mi","Ju","Vi","Sá"];
 function resumenDias(dias){
   if(!dias || !dias.length) return "—";
@@ -472,7 +483,7 @@ function renderServicios(){
       <td><strong>${s.nombre}</strong><br><span style="font-size:10px;color:var(--text3)">${s.tipo||"Consorcio"}</span></td>
       <td style="font-size:11px;color:var(--text2)">${nombreSup(s.supervisorId)}</td>
       <td style="font-size:11px;font-family:monospace">${resumenDist(s.id)}</td>
-      ${verVal?`<td style="font-family:monospace;font-size:11px">${fac.valorHora?"$"+Number(fac.valorHora).toLocaleString("es-AR"):"—"}</td>`:`<td style="color:var(--text3)">—</td>`}
+      ${verVal?`<td style="font-family:monospace;font-size:11px">${valorHoraDe(s.id)?"$"+valorHoraDe(s.id).toLocaleString("es-AR"):"—"}</td>`:`<td style="color:var(--text3)">—</td>`}
       <td style="white-space:nowrap">
         <button class="btn btn-sm" onclick="editarServicio('${s.id}')">${tienePermiso("editar")?"Ver / Editar":"Ver"}</button>
         ${tienePermiso("darBaja")?`<button class="btn btn-sm" onclick="bajaServicio('${s.id}')" style="color:var(--red-txt)">Baja</button>`:""}
@@ -1857,7 +1868,7 @@ function calcFacturacion(svcId, y, m){
   const res = resumenPlanilla(svcId, y, m);
   const tipoContrato = fac.tipoContrato || "horas";
   const tipoFactura = fac.tipoFactura || "A";
-  const vh = fac.valorHora || 0;
+  const vh = valorHoraDe(svcId);
 
   // hsSimples y hsFeriado son horas REALES. El doble de feriado va en el importe.
   const totalHs = res.hsSimples + res.hsFeriado;
@@ -1909,7 +1920,7 @@ function subtotalPlano(svcId, y, m){
   const fac = facDe(svcId);
   if((fac.tipoContrato||"horas") === "fijo") return fac.montoFijo || 0;
   const res = resumenPlanilla(svcId, y, m);
-  const vh = fac.valorHora || 0;
+  const vh = valorHoraDe(svcId);
   return vh * res.hsSimples + vh * 2 * res.hsFeriado;
 }
 
@@ -2153,7 +2164,7 @@ function renderComercial(){
     </div>`;
 
   const thVal = verVal?`<th style="text-align:right;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Valor hora</th>`:"";
-  const tdVal = (fac) => verVal?`<td style="padding:9px 12px;font-family:monospace;font-size:11px;text-align:right">${fac.tipoContrato==="fijo"?"Fijo: "+fmtMoneda(fac.montoFijo||0):fmtMoneda(fac.valorHora||0)}</td>`:"";
+  const tdVal = (s) => { if(!verVal) return ""; const fac=facDe(s.id); return `<td style="padding:9px 12px;font-family:monospace;font-size:11px;text-align:right">${fac.tipoContrato==="fijo"?"Fijo: "+fmtMoneda(fac.montoFijo||0):fmtMoneda(valorHoraDe(s.id))}</td>`; };
 
   // Mes anterior al que se está viendo
   let mAnt = APP.mes.m - 1, yAnt = APP.mes.y;
@@ -2176,7 +2187,7 @@ function renderComercial(){
       <td style="padding:9px 12px;font-size:11px">${s.contacto||"—"}</td>
       <td style="padding:9px 12px;font-size:11px">${s.materiales==="con"?'<span style="background:var(--green-bg);color:var(--green-txt);padding:2px 8px;border-radius:20px;font-size:10px">Con</span>':'<span style="color:var(--text3)">Sin</span>'}</td>
       <td style="padding:9px 12px;font-family:monospace;font-size:11px;text-align:right">${fmtHoras(hsSem)}</td>
-      ${tdVal(fac)}
+      ${tdVal(s)}
       ${tdFact(s.id)}
     </tr>`;
   };
@@ -2251,7 +2262,7 @@ function descargarComercial(){
   const filaDe = (s) => {
     const fac = facDe(s.id);
     const hsSem = horasSemanales(s.id);
-    const vh = verVal ? (fac.tipoContrato==="fijo" ? "Fijo "+Math.round(fac.montoFijo||0) : Math.round(fac.valorHora||0)) : "";
+    const vh = verVal ? (fac.tipoContrato==="fijo" ? "Fijo "+Math.round(fac.montoFijo||0) : Math.round(valorHoraDe(s.id))) : "";
     const sub = verVal ? Math.round(subtotalPlano(s.id, yAnt, mAnt)) : "";
     return [s.nombre, s.cuit||"", s.mail||"", s.telefono||"", s.contacto||"", s.materiales==="con"?"Con":"Sin", fmtHoras(hsSem)].concat(verVal?[vh, sub]:[]).join(";");
   };
