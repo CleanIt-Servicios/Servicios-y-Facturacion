@@ -3164,24 +3164,33 @@ async function procesarExcelXubio(input){
 const IVA_PCT = 0.21;
 
 // Servicios que usan un valor neto exacto (match por el neto)
-function serviciosConValor(neto){
+function serviciosConValor(neto, precioId){
   return APP.servicios.filter(s => {
     if(s.estado !== "activo") return false;
     const fac = facDe(s.id);
     if((fac.tipoContrato||"horas") === "fijo") return false;
+    // Si está vinculado, cuenta para SU precio (por precioId), no por número
+    if(fac.precioId) return fac.precioId === precioId;
+    // Si no está vinculado, coincide por el valor exacto
     return Number(fac.valorHora) === Number(neto);
   });
 }
 
-// Servicios activos por horas cuyo valor no coincide con ningún precio de la lista
+// Servicios activos por horas que NO están vinculados a ningún precio de la lista
+// y cuyo valor tampoco coincide con ninguno (los verdaderamente huérfanos)
 function serviciosFueraDeLista(){
   const netosLista = new Set(APP.precios.map(p => Number(p.neto)));
   return APP.servicios.filter(s => {
     if(s.estado !== "activo") return false;
     const fac = facDe(s.id);
     if((fac.tipoContrato||"horas") === "fijo") return false;
+    if(fac.precioId){
+      // Vinculado: está fuera solo si su precio ya no existe en la lista
+      return !APP.precios.some(p => p.id === fac.precioId);
+    }
+    // Sin vincular: está fuera si su valor no coincide con ningún precio
     const vh = Number(fac.valorHora) || 0;
-    if(vh <= 0) return false; // sin valor cargado, no cuenta como "fuera"
+    if(vh <= 0) return false;
     return !netosLista.has(vh);
   });
 }
@@ -3196,7 +3205,7 @@ function renderPrecios(){
     const neto = Number(p.neto) || 0;
     const iva = Math.round(neto * IVA_PCT);
     const final = neto + iva;
-    const svcs = serviciosConValor(neto);
+    const svcs = serviciosConValor(neto, p.id);
     const expandido = PRECIO_EXPANDIDO === p.id;
 
     let filaExpandida = "";
@@ -3431,7 +3440,7 @@ function simularAumento(tipo){
 
   const filas = precios.map(p => {
     const viejo = Number(p.neto)||0;
-    const nuevo = viejo * (1 + pct/100);
+    const nuevo = Math.round(viejo * (1 + pct/100));
     const svc = servicioEjemploDePrecio(p.id);
     let ejemplo = "";
     if(svc){
@@ -3465,7 +3474,7 @@ function aplicarAumento(tipo){
     const p = APP.precios.find(x => x.id === pid);
     if(!p) return;
     const viejo = Number(p.neto)||0;
-    const nuevo = viejo * (1 + pct/100);
+    const nuevo = Math.round(viejo * (1 + pct/100));
     detalle.push({ precioId:pid, nombre:p.nombre, netoAnterior:viejo, netoNuevo:nuevo });
   });
 
