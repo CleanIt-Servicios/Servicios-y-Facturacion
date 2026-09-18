@@ -513,7 +513,7 @@ function nuevoServicio(){
     nombre:"", tipo:"Consorcio", cuit:"", mail:"", telefono:"", contacto:"", razonSocial:"", materiales:"sin",
     supervisorId:"", fechaInicio: hoyISO(),
     // facturación
-    valorHora:0, tipoFactura:"A", tipoContrato:"horas", montoFijo:0,
+    valorHora:0, precioId:"", tipoFactura:"A", tipoContrato:"horas", montoFijo:0,
     // distribución
     turnos:[ nuevoTurno() ],
   };
@@ -530,7 +530,7 @@ function editarServicio(id){
     id: s.id,
     nombre: s.nombre, tipo: s.tipo||"Consorcio", cuit: s.cuit||"", mail: s.mail||"", telefono: s.telefono||"", contacto: s.contacto||"", razonSocial: s.razonSocial||"", materiales: s.materiales||"sin",
     supervisorId: s.supervisorId||"", fechaInicio: s.fechaInicio||"",
-    valorHora: fac.valorHora||0, tipoFactura: fac.tipoFactura||"A",
+    valorHora: fac.valorHora||0, precioId: fac.precioId||"", tipoFactura: fac.tipoFactura||"A",
     tipoContrato: fac.tipoContrato||"horas", montoFijo: fac.montoFijo||0,
     turnos: dist.turnos && dist.turnos.length ? JSON.parse(JSON.stringify(dist.turnos)) : [ nuevoTurno() ],
   };
@@ -556,6 +556,59 @@ function horarioDia(turno, dw){
   const esp = (turno.horarioPorDia||{})[dw];
   if(esp && esp.entrada && esp.salida) return { entrada:esp.entrada, salida:esp.salida };
   return { entrada:turno.entrada, salida:turno.salida };
+}
+
+// Selector de precio de la lista para el formulario de servicio
+function selectorPrecio(f){
+  const dis = tienePermiso("editar") ? "" : "disabled";
+  const precios = APP.precios.slice().sort((a,b)=>(a.nombre||"").localeCompare(b.nombre||"","es"));
+  // Determinar el precio seleccionado: por precioId, o por match de valorHora
+  let selId = f.precioId || "";
+  if(!selId && f.valorHora>0){
+    const match = precios.find(p => Number(p.neto) === Number(f.valorHora));
+    if(match) selId = match.id;
+  }
+  const opts = precios.map(p => {
+    const neto = Number(p.neto)||0;
+    return `<option value="${p.id}" ${selId===p.id?"selected":""}>${p.nombre} — ${fmtMoneda(neto)} + IVA</option>`;
+  }).join("");
+  const sel = precios.find(p=>p.id===selId);
+  const preview = sel ? `Neto ${fmtMoneda(sel.neto)} · IVA ${fmtMoneda(Math.round(sel.neto*0.21))} · Final ${fmtMoneda(sel.neto+Math.round(sel.neto*0.21))}`
+    : (f.valorHora>0 ? `Valor actual sin vincular: ${fmtMoneda(f.valorHora)} — elegí un precio de la lista o creá uno` : "Elegí un precio de la lista");
+
+  return `<div style="margin-bottom:14px">
+    <label style="font-size:11px;font-weight:600;color:var(--text2);display:block;margin-bottom:5px;text-transform:uppercase;letter-spacing:0.5px">Valor hora (de la lista de precios)</label>
+    <select id="svc-precioId" ${dis} onchange="onCambioPrecioSvc(this.value)" style="width:100%;padding:9px 12px;border:1px solid var(--border2);border-radius:var(--radius);font-size:13px">
+      <option value="">— Elegí un precio —</option>
+      ${opts}
+      <option value="__nuevo__">+ Crear un precio nuevo...</option>
+    </select>
+    <div id="svc-precio-preview" style="font-size:11px;color:var(--text3);margin-top:5px">${preview}</div>
+  </div>`;
+}
+
+// Al cambiar el desplegable de precio en el servicio
+function onCambioPrecioSvc(val){
+  if(val === "__nuevo__"){
+    const nombre = prompt("Nombre del nuevo valor (ej: Hora maestranza especial):", "");
+    if(!nombre || !nombre.trim()){ render(); return; }
+    const netoStr = prompt(`Valor neto (sin IVA) de "${nombre.trim()}":`, "");
+    const neto = parseFloat(netoStr)||0;
+    if(neto <= 0){ alert("Valor inválido"); render(); return; }
+    // Crear el precio en la lista y vincular el servicio a él
+    const id = nuevoId("V");
+    APP.precios.push({ id, nombre:nombre.trim(), neto });
+    guardarLocal();
+    driveSavePrecio(id);
+    FORM_SVC.precioId = id;
+    FORM_SVC.valorHora = neto;
+  } else if(val === ""){
+    FORM_SVC.precioId = "";
+  } else {
+    const p = APP.precios.find(x => x.id === val);
+    if(p){ FORM_SVC.precioId = p.id; FORM_SVC.valorHora = Number(p.neto)||0; }
+  }
+  render();
 }
 
 function renderFormSvc(){
@@ -693,7 +746,7 @@ function renderFormSvc(){
       </div>
       ${f.tipoContrato==="fijo"
         ? campo("Monto fijo mensual","svc-montoFijo",f.montoFijo,"number","")
-        : campo("Valor hora","svc-valorHora",f.valorHora,"number","")}
+        : selectorPrecio(f)}
     </div></div>`:""}
 
     <div class="card"><div class="card-header"><h3>Distribución — turnos</h3>
@@ -775,7 +828,7 @@ function guardarServicio(){
   }
 
   // Facturación (hoja 2) — upsert por svcId
-  const facData = { svcId, valorHora:f.valorHora, tipoFactura:f.tipoFactura, tipoContrato:f.tipoContrato, montoFijo:f.montoFijo };
+  const facData = { svcId, valorHora:f.valorHora, precioId:f.precioId||"", tipoFactura:f.tipoFactura, tipoContrato:f.tipoContrato, montoFijo:f.montoFijo };
   const iFac = APP.facturacion.findIndex(x => x.svcId === svcId);
   if(iFac >= 0) APP.facturacion[iFac] = facData; else APP.facturacion.push(facData);
 
@@ -3160,7 +3213,10 @@ function renderPrecios(){
 
   return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
       <div style="font-size:12px;color:var(--text2)">Los valores se cargan sin IVA. El final se calcula solo.</div>
-      <button class="btn btn-primary" onclick="nuevoPrecio()">+ Nuevo valor</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn" onclick="vincularServiciosAuto()">🔗 Vincular servicios que coinciden</button>
+        <button class="btn btn-primary" onclick="nuevoPrecio()">+ Nuevo valor</button>
+      </div>
     </div>
     <div class="card"><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
       <thead><tr style="background:var(--surface2)">
@@ -3244,6 +3300,41 @@ function eliminarPrecio(id){
   guardarLocal();
   driveDeletePrecio(id);
   render();
+}
+
+// Paso intermedio: vincular automáticamente los servicios cuyo valor
+// coincide exacto con un precio de la lista, pero que todavía no están vinculados
+function vincularServiciosAuto(){
+  const netoAPrecio = {};
+  APP.precios.forEach(p => { netoAPrecio[Number(p.neto)] = p.id; });
+
+  let vinculados = 0;
+  const paraGuardar = [];
+  APP.servicios.forEach(s => {
+    if(s.estado !== "activo") return;
+    const fac = facDe(s.id);
+    if((fac.tipoContrato||"horas") === "fijo") return;
+    if(fac.precioId) return; // ya vinculado
+    const vh = Number(fac.valorHora)||0;
+    const pid = netoAPrecio[vh];
+    if(pid){
+      const iFac = APP.facturacion.findIndex(x => x.svcId === s.id);
+      if(iFac >= 0){ APP.facturacion[iFac] = {...APP.facturacion[iFac], precioId:pid}; }
+      else { APP.facturacion.push({ svcId:s.id, valorHora:vh, precioId:pid, tipoFactura:"A", tipoContrato:"horas", montoFijo:0 }); }
+      paraGuardar.push(s.id);
+      vinculados++;
+    }
+  });
+
+  if(!vinculados){
+    alert("No hay servicios sin vincular que coincidan con un precio de la lista.\n\n(O ya están todos vinculados, o los que quedan tienen valores que no están en la lista — mirá el bloque ámbar.)");
+    return;
+  }
+  guardarLocal();
+  render();
+  // Guardar en Drive los servicios afectados
+  paraGuardar.forEach(id => driveSaveServicio(id));
+  alert(`✅ ${vinculados} servicio(s) vinculados automáticamente a su precio de la lista.`);
 }
 
 function renderConfig(){
