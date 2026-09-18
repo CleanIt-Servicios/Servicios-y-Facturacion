@@ -26,6 +26,7 @@ const APP = {
   reclamos: [],       // hoja 9  (reclamos de facturación)
   cobranzas: [],      // hoja 10 (facturas de Xubio + cobros)
   precios: [],        // hoja 11 (lista de precios: valores sin IVA)
+  aumentos: [],       // hoja 12 (historial de aumentos de precios)
 
   // --- Auth ---
   auth: {
@@ -35,7 +36,7 @@ const APP = {
   },
 
   // --- Contadores de ID (para prefijos únicos) ---
-  contadores: { S: 0, O: 0, P: 0, M: 0, R: 0, V: 0 },
+  contadores: { S: 0, O: 0, P: 0, M: 0, R: 0, V: 0, A: 0 },
 };
 
 // ============================================================
@@ -106,6 +107,7 @@ function guardarLocal(){
       reclamos: APP.reclamos,
       cobranzas: APP.cobranzas,
       precios: APP.precios,
+      aumentos: APP.aumentos,
       contadores: APP.contadores,
     }));
   }catch(e){ console.error("Error guardando local:", e); }
@@ -125,6 +127,7 @@ function cargarLocal(){
     APP.reclamos     = d.reclamos     || [];
     APP.cobranzas    = d.cobranzas    || [];
     APP.precios      = d.precios      || [];
+    APP.aumentos     = d.aumentos     || [];
     APP.contadores   = d.contadores   || { S:0, O:0, P:0, M:0, R:0 };
     return true;
   }catch(e){ console.error("Error cargando local:", e); return false; }
@@ -147,6 +150,7 @@ async function cargarDeDrive(){
       APP.reclamos     = data.reclamos || [];
       APP.cobranzas    = (data.cobranzas || []).map(normalizarCobranza);
       APP.precios      = data.precios || [];
+      APP.aumentos     = data.aumentos || [];
       // Recalcular contadores desde los IDs existentes (para no repetir)
       recalcularContadores();
       guardarLocal();
@@ -175,6 +179,7 @@ function recalcularContadores(){
     M: maxId(APP.movimientos, "M"),
     R: maxId(APP.reclamos, "R"),
     V: maxId(APP.precios, "V"),
+    A: maxId(APP.aumentos, "A"),
   };
 }
 
@@ -296,6 +301,22 @@ async function driveDeletePrecio(id){
   if(!driveActivo()) return;
   try{
     await fetch(SCRIPT_URL, { method:"POST", body: JSON.stringify({ action:"deletePrecio", id:id })});
+  }catch(e){ console.error(e); }
+}
+
+async function driveSaveAumento(id){
+  if(!driveActivo()) return;
+  const a = APP.aumentos.find(x => x.id === id);
+  if(!a) return;
+  try{
+    await fetch(SCRIPT_URL, { method:"POST", body: JSON.stringify({ action:"upsertAumento", aumento:a })});
+  }catch(e){ console.error(e); }
+}
+
+async function driveDeleteAumento(id){
+  if(!driveActivo()) return;
+  try{
+    await fetch(SCRIPT_URL, { method:"POST", body: JSON.stringify({ action:"deleteAumento", id:id })});
   }catch(e){ console.error(e); }
 }
 
@@ -3198,6 +3219,7 @@ function renderPrecios(){
           : `<span style="font-size:12px;color:var(--text3)">sin uso</span>`
       }</td>
       <td style="padding:12px 14px;text-align:center;white-space:nowrap">
+        <button class="btn btn-sm" onclick="abrirAumentoPuntual('${p.id}')" title="Aumentar %">📊</button>
         <button class="btn btn-sm" onclick="editarPrecio('${p.id}')">Editar</button>
         <button class="btn btn-sm" onclick="eliminarPrecio('${p.id}')" style="color:var(--red-txt)">Borrar</button>
       </td>
@@ -3225,6 +3247,8 @@ function renderPrecios(){
   return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
       <div style="font-size:12px;color:var(--text2)">Los valores se cargan sin IVA. El final se calcula solo.</div>
       <div style="display:flex;gap:8px">
+        <button class="btn" onclick="verHistorialAumentos()">📈 Historial</button>
+        <button class="btn" onclick="abrirAumentoGeneral()">📊 Aumento general</button>
         <button class="btn" onclick="vincularServiciosAuto()">🔗 Vincular servicios que coinciden</button>
         <button class="btn btn-primary" onclick="nuevoPrecio()">+ Nuevo valor</button>
       </div>
@@ -3346,6 +3370,205 @@ function vincularServiciosAuto(){
   // Guardar en Drive los servicios afectados
   paraGuardar.forEach(id => driveSaveServicio(id));
   alert(`✅ ${vinculados} servicio(s) vinculados automáticamente a su precio de la lista.`);
+}
+
+// ============================================================
+// AUMENTOS — puntual y general, con simulación e historial
+// ============================================================
+
+// Aumento puntual: un precio específico
+function abrirAumentoPuntual(id){
+  const p = APP.precios.find(x => x.id === id);
+  if(!p) return;
+  mostrarModalAumento([p], "puntual", `Aumentar "${p.nombre}"`);
+}
+
+// Aumento general: todos los precios
+function abrirAumentoGeneral(){
+  if(!APP.precios.length){ alert("No hay precios en la lista para aumentar."); return; }
+  mostrarModalAumento(APP.precios.slice(), "general", "Aumento general a toda la lista");
+}
+
+// Modal con simulación: ves cómo quedaría antes de aplicar
+function mostrarModalAumento(precios, tipo, titulo){
+  const modal = document.getElementById("modal");
+  modal.innerHTML = `
+    <div class="modal-backdrop" onclick="cerrarModal()"></div>
+    <div class="modal-box" style="max-width:560px">
+      <div class="modal-title">${titulo}</div>
+      <div class="modal-field"><label>Porcentaje de aumento</label>
+        <input id="aum-pct" type="number" step="0.1" placeholder="Ej: 10" oninput="simularAumento('${tipo}')">
+      </div>
+      <div id="aum-preview" style="max-height:320px;overflow-y:auto;margin-bottom:14px"></div>
+      <div class="modal-actions">
+        <button class="btn" onclick="cerrarModal()">Cancelar</button>
+        <button class="btn btn-primary" onclick="aplicarAumento('${tipo}')">Aplicar aumento</button>
+      </div>
+    </div>`;
+  modal.style.display = "flex";
+  // Guardar en memoria qué precios entran en este aumento
+  AUMENTO_PRECIOS = precios.map(p => p.id);
+}
+
+let AUMENTO_PRECIOS = [];
+
+// Un servicio de ejemplo vinculado a un precio (para mostrar impacto)
+function servicioEjemploDePrecio(precioId){
+  return APP.servicios.find(s => {
+    if(s.estado!=="activo") return false;
+    return facDe(s.id).precioId === precioId;
+  });
+}
+
+function simularAumento(tipo){
+  const pct = parseFloat(document.getElementById("aum-pct").value)||0;
+  const el = document.getElementById("aum-preview");
+  if(!el) return;
+  if(!pct){ el.innerHTML = `<div style="font-size:12px;color:var(--text3);padding:8px 0">Ingresá un porcentaje para ver la simulación.</div>`; return; }
+
+  const precios = APP.precios.filter(p => AUMENTO_PRECIOS.includes(p.id))
+    .sort((a,b)=>(a.nombre||"").localeCompare(b.nombre||"","es"));
+
+  const filas = precios.map(p => {
+    const viejo = Number(p.neto)||0;
+    const nuevo = viejo * (1 + pct/100);
+    const svc = servicioEjemploDePrecio(p.id);
+    let ejemplo = "";
+    if(svc){
+      // Impacto con las horas del mes actual
+      const subViejo = subtotalPlano(svc.id, APP.mes.y, APP.mes.m);
+      // Simular con el nuevo valor (temporalmente)
+      const res = resumenPlanilla(svc.id, APP.mes.y, APP.mes.m);
+      const subNuevo = nuevo * res.hsSimples + nuevo * 2 * res.hsFeriado;
+      ejemplo = `<div style="font-size:10px;color:var(--text3);margin-top:2px">ej: ${svc.nombre} · ${fmtMoneda(subViejo)} → ${fmtMoneda(subNuevo)} (mes actual)</div>`;
+    }
+    return `<div style="padding:8px 0;border-bottom:0.5px solid var(--border)">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span style="font-weight:500;font-size:13px">${p.nombre}</span>
+        <span style="font-family:monospace;font-size:13px">${fmtMoneda(viejo)} → <strong style="color:var(--green-txt)">${fmtMoneda(nuevo)}</strong></span>
+      </div>
+      ${ejemplo}
+    </div>`;
+  }).join("");
+
+  el.innerHTML = `<div style="font-size:11px;color:var(--text3);text-transform:uppercase;margin-bottom:4px">Así quedarían ${precios.length} precio(s)</div>${filas}`;
+}
+
+function aplicarAumento(tipo){
+  const pct = parseFloat(document.getElementById("aum-pct").value)||0;
+  if(!pct){ alert("Ingresá un porcentaje"); return; }
+  if(!confirm(`¿Aplicar un aumento del ${pct}% a ${AUMENTO_PRECIOS.length} precio(s)? Se propaga a todos los servicios vinculados.`)) return;
+
+  // Guardar el estado anterior de cada precio (para regresión)
+  const detalle = [];
+  AUMENTO_PRECIOS.forEach(pid => {
+    const p = APP.precios.find(x => x.id === pid);
+    if(!p) return;
+    const viejo = Number(p.neto)||0;
+    const nuevo = viejo * (1 + pct/100);
+    detalle.push({ precioId:pid, nombre:p.nombre, netoAnterior:viejo, netoNuevo:nuevo });
+  });
+
+  // Aplicar
+  const idsAfectados = [];
+  detalle.forEach(d => {
+    APP.precios = APP.precios.map(p => p.id===d.precioId ? {...p, neto:d.netoNuevo} : p);
+    idsAfectados.push(d.precioId);
+  });
+
+  // Registrar en el historial
+  const aumId = nuevoId("A");
+  const registro = {
+    id: aumId,
+    fecha: hoyISO(),
+    tipo,
+    pct,
+    detalle: JSON.stringify(detalle),
+    quien: APP.auth.usuario,
+    timestamp: new Date().toISOString(),
+    revertido: false,
+  };
+  APP.aumentos.push(registro);
+
+  guardarLocal();
+  driveSaveAumento(aumId);
+  idsAfectados.forEach(id => driveSavePrecio(id));
+  cerrarModal();
+  render();
+  alert(`✅ Aumento del ${pct}% aplicado a ${detalle.length} precio(s). Ya se refleja en los servicios vinculados.`);
+}
+
+// ============================================================
+// HISTORIAL DE AUMENTOS + regresión
+// ============================================================
+function verHistorialAumentos(){
+  APP.screen = "aumentos-historial";
+  render();
+}
+
+function renderHistorialAumentos(){
+  const aumentos = APP.aumentos.slice().sort((a,b)=>(b.timestamp||"").localeCompare(a.timestamp||""));
+
+  const filas = aumentos.map(a => {
+    let detalle = [];
+    try{ detalle = JSON.parse(a.detalle||"[]"); }catch(e){}
+    const resumen = detalle.slice(0,3).map(d => `${d.nombre}: ${fmtMoneda(d.netoAnterior)}→${fmtMoneda(d.netoNuevo)}`).join(" · ")
+      + (detalle.length>3?` +${detalle.length-3} más`:"");
+    return `<tr style="${a.revertido?'opacity:0.5':''}">
+      <td style="padding:10px 12px;font-family:monospace;font-size:11px">${(a.fecha||"").split("-").reverse().join("/")}</td>
+      <td style="padding:10px 12px;font-size:12px">${a.tipo==="general"?"General":"Puntual"}</td>
+      <td style="padding:10px 12px;font-family:monospace;font-size:13px;font-weight:500">+${a.pct}%</td>
+      <td style="padding:10px 12px;font-size:11px;color:var(--text3);max-width:280px">${resumen}</td>
+      <td style="padding:10px 12px;font-size:11px;color:var(--text2)">${a.quien||"—"}</td>
+      <td style="padding:10px 12px;text-align:right">
+        ${a.revertido
+          ? `<span style="font-size:11px;color:var(--text3)">revertido</span>`
+          : `<button class="btn btn-sm" onclick="revertirAumento('${a.id}')" style="color:var(--red-txt)">Deshacer</button>`}
+      </td>
+    </tr>`;
+  }).join("");
+
+  return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+      <button class="btn btn-sm" onclick="APP.screen='precios';render()">‹ Volver a la lista</button>
+      <h2 style="font-size:16px;font-weight:500">Historial de aumentos</h2>
+    </div>
+    <div class="card"><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
+      <thead><tr style="background:var(--surface2)">
+        <th style="text-align:left;padding:9px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Fecha</th>
+        <th style="text-align:left;padding:9px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Tipo</th>
+        <th style="text-align:left;padding:9px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">%</th>
+        <th style="text-align:left;padding:9px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Detalle</th>
+        <th style="text-align:left;padding:9px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Quién</th>
+        <th style="padding:9px 12px"></th>
+      </tr></thead>
+      <tbody>${filas || `<tr><td colspan="6" style="text-align:center;padding:32px;color:var(--text3)">Todavía no se hicieron aumentos.</td></tr>`}</tbody>
+    </table></div></div>`;
+}
+
+function revertirAumento(id){
+  const a = APP.aumentos.find(x => x.id === id);
+  if(!a || a.revertido) return;
+  let detalle = [];
+  try{ detalle = JSON.parse(a.detalle||"[]"); }catch(e){}
+  if(!detalle.length){ alert("No hay detalle para revertir este aumento."); return; }
+  if(!confirm(`¿Deshacer el aumento del ${a.pct}%? Los ${detalle.length} precio(s) vuelven a su valor anterior, y eso se propaga a los servicios vinculados.`)) return;
+
+  const idsAfectados = [];
+  detalle.forEach(d => {
+    // Solo restaurar si el precio todavía existe y está en el valor que dejó este aumento
+    const p = APP.precios.find(x => x.id === d.precioId);
+    if(p){
+      APP.precios = APP.precios.map(x => x.id===d.precioId ? {...x, neto:d.netoAnterior} : x);
+      idsAfectados.push(d.precioId);
+    }
+  });
+
+  APP.aumentos = APP.aumentos.map(x => x.id===id ? {...x, revertido:true} : x);
+  guardarLocal();
+  driveSaveAumento(id);
+  idsAfectados.forEach(pid => driveSavePrecio(pid));
+  render();
+  alert(`✅ Aumento deshecho. ${idsAfectados.length} precio(s) restaurados a su valor anterior.`);
 }
 
 function renderConfig(){
@@ -3535,6 +3758,7 @@ const RENDERERS = {
   prefac: renderPrefac,
   cobranzas: renderCobranzas,
   precios: renderPrecios,
+  "aumentos-historial": renderHistorialAumentos,
   reclamos: renderReclamos,
   comercial: renderComercial,
   "comercial-bajas": renderComercialBajas,
@@ -3563,7 +3787,7 @@ function render(){
 
   // Si la pantalla actual no está permitida, ir a la primera permitida
   // (form-svc es sub-pantalla de servicios)
-  const subPantallas = { "form-svc":"servicios", "planilla-op":"operarios" };
+  const subPantallas = { "form-svc":"servicios", "planilla-op":"operarios", "aumentos-historial":"precios" };
   const screenBase = subPantallas[APP.screen] || APP.screen;
   if(!puedeVer(screenBase)){
     const primera = PERMISOS[APP.auth.perfil].screens[0];
