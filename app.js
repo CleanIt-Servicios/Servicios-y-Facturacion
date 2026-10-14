@@ -25,6 +25,8 @@ const APP = {
   movimientos: [],    // hoja 8
   reclamos: [],       // hoja 9  (reclamos de facturación)
   cobranzas: [],      // hoja 10 (facturas de Xubio + cobros)
+  precios: [],        // hoja 11 (lista de precios: valores sin IVA)
+  aumentos: [],       // hoja 12 (historial de aumentos de precios)
 
   // --- Auth ---
   auth: {
@@ -34,7 +36,7 @@ const APP = {
   },
 
   // --- Contadores de ID (para prefijos únicos) ---
-  contadores: { S: 0, O: 0, P: 0, M: 0, R: 0 },
+  contadores: { S: 0, O: 0, P: 0, M: 0, R: 0, V: 0, A: 0 },
 };
 
 // ============================================================
@@ -50,11 +52,11 @@ const USUARIOS_LOGIN = {
 
 const PERMISOS = {
   rrhh: {
-    screens: ["servicios","bajas","operarios","personal","distribucion","control","movimientos","prefac","cobranzas","reclamos","config"],
+    screens: ["servicios","bajas","operarios","personal","distribucion","control","movimientos","prefac","cobranzas","precios","reclamos","config"],
     editar: true, verValores: true, verFacturacion: true, darBaja: true, configurar: true, verTodo: true,
   },
   facturacion: {
-    screens: ["servicios","prefac","cobranzas","movimientos","reclamos","comercial","comercial-bajas"],
+    screens: ["servicios","prefac","cobranzas","precios","movimientos","reclamos","comercial","comercial-bajas"],
     editar: false, verValores: true, verFacturacion: true, darBaja: false, configurar: false, verTodo: true,
   },
   jefe: {
@@ -88,10 +90,119 @@ function nuevoId(prefijo){
 // PERSISTENCIA — localStorage + Google Sheets
 // ============================================================
 const LS_KEY = "cleanit_v2";
-// Pegar acá la URL del Apps Script publicado (termina en /exec)
-const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw6YtTBxJ3COqwxBWI2py1zNJuEP9SY8-7nhiv-2U-rEwCePKVp9QfKYHc5lEaTFeTx/exec";  // Apps Script de PRUEBA
 
-function driveActivo(){ return SCRIPT_URL && SCRIPT_URL.indexOf("/exec") > 0; }
+// ============================================================
+// SEGURIDAD DE ENTORNO  ← LEER ANTES DE SUBIR A GITHUB
+// ------------------------------------------------------------
+// Dos cosas tienen que ir SIEMPRE de la mano y apuntar al mismo lado:
+//   1) SCRIPT_URL          → la URL del Apps Script de esa planilla
+//   2) ENTORNO_ESPERADO    → qué planilla DEBE tocar esta app
+//
+// Cuando la app arranca, le pregunta a la base "¿quién sos?" y
+// compara con ENTORNO_ESPERADO. Si no coinciden, se BLOQUEA sola y
+// avisa en rojo — así nunca más la main termina escribiendo en la
+// planilla de prueba (ni al revés).
+//
+//   rama MAIN (producción) → ENTORNO_ESPERADO = "PRODUCCION" + URL real
+//   rama de pruebas        → ENTORNO_ESPERADO = "TESTEO"     + URL de prueba
+// ============================================================
+
+// ---- MAIN (PRODUCCIÓN) — la planilla real, donde se factura ----
+const ENTORNO_ESPERADO = "PRODUCCION";
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw6YtTBxJ3COqwxBWI2py1zNJuEP9SY8-7nhiv-2U-rEwCePKVp9QfKYHc5lEaTFeTx/exec";  // Base PRODUCCIÓN (la real)
+
+// ---- Para la rama de PRUEBAS, reemplazá las 2 líneas de arriba por: ----
+// const ENTORNO_ESPERADO = "TESTEO";
+// const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw3whyuVsG4OwkQIMSoEc31lCDSdHqs-DiIN-bVYJq0Q4T26NNkGIyw_oFGer4kKnnH/exec";  // Base TESTEO
+
+// Entorno confirmado por la base (se completa al cargar). null = sin verificar todavía.
+let ENTORNO_REAL = null;
+let ENTORNO_BLOQUEADO = false;
+
+// Nota: si el entorno quedó bloqueado por no coincidir la identidad,
+// driveActivo() devuelve false → se cortan TODAS las lecturas y escrituras
+// a la planilla. La app sigue mostrando lo local, pero no toca la base.
+function driveActivo(){ return !ENTORNO_BLOQUEADO && SCRIPT_URL && SCRIPT_URL.indexOf("/exec") > 0; }
+
+// ============================================================
+// VERIFICACIÓN DE ENTORNO + CARTEL VISIBLE
+// ============================================================
+// La base declara su identidad (entorno). Comparamos con lo que
+// ESTA app espera (ENTORNO_ESPERADO):
+//   - coincide           → cartel del color del entorno, todo normal
+//   - NO coincide        → bloqueo total + alerta roja a pantalla completa
+//   - la base no declara → cartel ámbar "sin verificar" (no bloquea)
+function verificarEntorno(entornoBase){
+  ENTORNO_REAL = entornoBase || null;
+
+  // La base no declara identidad (Apps Script viejo): avisar pero no bloquear.
+  if(!entornoBase){
+    pintarBanner("warn");
+    return true;
+  }
+
+  // Coincide: todo bien.
+  if(String(entornoBase).toUpperCase() === String(ENTORNO_ESPERADO).toUpperCase()){
+    ENTORNO_BLOQUEADO = false;
+    pintarBanner("ok");
+    return true;
+  }
+
+  // NO coincide: esta app apunta a la planilla equivocada. Bloquear.
+  ENTORNO_BLOQUEADO = true;
+  bloquearPorEntorno(entornoBase);
+  return false;
+}
+
+// Cartel visible siempre en pantalla (esquina superior derecha).
+// estado: "ok" | "warn" | "pending"
+function pintarBanner(estado){
+  let el = document.getElementById("env-badge");
+  if(!el){
+    el = document.createElement("div");
+    el.id = "env-badge";
+    document.body.appendChild(el);
+  }
+  const esProd = String(ENTORNO_ESPERADO).toUpperCase() === "PRODUCCION";
+  const nombre = esProd ? "PRODUCCIÓN" : "TESTEO";
+  el.className = "env-badge " + (esProd ? "env-prod" : "env-test") + (estado==="warn" ? " env-unver" : "");
+
+  let marca = "";
+  if(estado === "ok")        marca = "✓";
+  else if(estado === "warn") marca = "⚠ sin verificar";
+  else                       marca = "…";
+
+  el.innerHTML = `<span class="env-dot"></span>${nombre} <span class="env-mark">${marca}</span>`;
+  el.title = estado==="warn"
+    ? "La base no confirmó su identidad. Actualizá el Apps Script para activar la verificación."
+    : `Conectado a la planilla de ${nombre}`;
+}
+
+// Pantalla roja bloqueante cuando la identidad no coincide.
+function bloquearPorEntorno(entornoBase){
+  let ov = document.getElementById("env-block");
+  if(!ov){
+    ov = document.createElement("div");
+    ov.id = "env-block";
+    document.body.appendChild(ov);
+  }
+  const espProd = String(ENTORNO_ESPERADO).toUpperCase()==="PRODUCCION";
+  const baseProd = String(entornoBase).toUpperCase()==="PRODUCCION";
+  ov.innerHTML = `
+    <div class="env-block-box">
+      <div class="env-block-icon">⛔</div>
+      <h2>Base equivocada — app bloqueada</h2>
+      <p>Esta app está preparada para la planilla
+         <b>${espProd?"PRODUCCIÓN":"TESTEO"}</b>,
+         pero la base que respondió dice ser
+         <b>${baseProd?"PRODUCCIÓN":"TESTEO"}</b>.</p>
+      <p class="env-block-warn">No se cargó ni se guardó nada, para no mezclar datos.</p>
+      <p class="env-block-hint">Revisá que la URL del Apps Script (SCRIPT_URL) sea la de la
+         planilla correcta antes de usar la app. Si no sabés qué pasó, avisá a Manu
+         <b>antes</b> de tocar nada.</p>
+    </div>`;
+  ov.style.display = "flex";
+}
 
 function guardarLocal(){
   try{
@@ -104,6 +215,8 @@ function guardarLocal(){
       movimientos: APP.movimientos,
       reclamos: APP.reclamos,
       cobranzas: APP.cobranzas,
+      precios: APP.precios,
+      aumentos: APP.aumentos,
       contadores: APP.contadores,
     }));
   }catch(e){ console.error("Error guardando local:", e); }
@@ -122,6 +235,8 @@ function cargarLocal(){
     APP.movimientos  = d.movimientos  || [];
     APP.reclamos     = d.reclamos     || [];
     APP.cobranzas    = d.cobranzas    || [];
+    APP.precios      = d.precios      || [];
+    APP.aumentos     = d.aumentos     || [];
     APP.contadores   = d.contadores   || { S:0, O:0, P:0, M:0, R:0 };
     return true;
   }catch(e){ console.error("Error cargando local:", e); return false; }
@@ -134,6 +249,13 @@ async function cargarDeDrive(){
     showLoading("⏳ Cargando desde Drive...");
     const resp = await fetch(SCRIPT_URL + "?action=getData");
     const data = await resp.json();
+    // --- VERIFICACIÓN DE IDENTIDAD ---
+    // La base nos dice quién es (data.entorno). Si no es la que esta app
+    // espera, NO cargamos ni guardamos nada: bloqueamos y avisamos.
+    if(!verificarEntorno(data.entorno)){
+      hideLoading();
+      return false;
+    }
     if(data.ok){
       APP.servicios    = (data.servicios || []).map(normalizarServicio);
       APP.facturacion  = data.facturacion  || [];
@@ -143,6 +265,8 @@ async function cargarDeDrive(){
       APP.movimientos  = (data.movimientos || []).map(normalizarMovimiento);
       APP.reclamos     = data.reclamos || [];
       APP.cobranzas    = (data.cobranzas || []).map(normalizarCobranza);
+      APP.precios      = data.precios || [];
+      APP.aumentos     = data.aumentos || [];
       // Recalcular contadores desde los IDs existentes (para no repetir)
       recalcularContadores();
       guardarLocal();
@@ -170,6 +294,8 @@ function recalcularContadores(){
     P: maxId(APP.supervisores, "P"),
     M: maxId(APP.movimientos, "M"),
     R: maxId(APP.reclamos, "R"),
+    V: maxId(APP.precios, "V"),
+    A: maxId(APP.aumentos, "A"),
   };
 }
 
@@ -278,6 +404,38 @@ async function driveDeleteCobranza(id){
   }catch(e){ console.error(e); }
 }
 
+async function driveSavePrecio(id){
+  if(!driveActivo()) return;
+  const p = APP.precios.find(x => x.id === id);
+  if(!p) return;
+  try{
+    await fetch(SCRIPT_URL, { method:"POST", body: JSON.stringify({ action:"upsertPrecio", precio:p })});
+  }catch(e){ console.error(e); }
+}
+
+async function driveDeletePrecio(id){
+  if(!driveActivo()) return;
+  try{
+    await fetch(SCRIPT_URL, { method:"POST", body: JSON.stringify({ action:"deletePrecio", id:id })});
+  }catch(e){ console.error(e); }
+}
+
+async function driveSaveAumento(id){
+  if(!driveActivo()) return;
+  const a = APP.aumentos.find(x => x.id === id);
+  if(!a) return;
+  try{
+    await fetch(SCRIPT_URL, { method:"POST", body: JSON.stringify({ action:"upsertAumento", aumento:a })});
+  }catch(e){ console.error(e); }
+}
+
+async function driveDeleteAumento(id){
+  if(!driveActivo()) return;
+  try{
+    await fetch(SCRIPT_URL, { method:"POST", body: JSON.stringify({ action:"deleteAumento", id:id })});
+  }catch(e){ console.error(e); }
+}
+
 // ============================================================
 // AUTH
 // ============================================================
@@ -348,6 +506,7 @@ const SCREENS = {
   movimientos:  { titulo: "Movimientos",      icono: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" },
   prefac:       { titulo: "Prefacturación",   icono: "M9 7h6m-6 4h6m-6 4h4m-8 4h12a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z" },
   cobranzas:    { titulo: "Cobranzas",        icono: "M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" },
+  precios:      { titulo: "Lista de precios", icono: "M7 7h.01M7 3h5a1.99 1.99 0 011.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.99 1.99 0 013 12V7a4 4 0 014-4z" },
   reclamos:     { titulo: "Reclamos",         icono: "M12 9v2m0 4h.01M5 19h14a2 2 0 001.84-2.75L13.74 4a2 2 0 00-3.5 0L3.16 16.25A2 2 0 005 19z" },
   comercial:    { titulo: "Comercial",        icono: "M3 3v18h18M18 17V9M13 17V5M8 17v-3" },
   bajas:        { titulo: "Bajas",             icono: "M18 6L6 18M6 6l12 12" },
@@ -358,7 +517,7 @@ const SCREENS = {
 const NAV_GROUPS = [
   { label: "Operaciones", items: ["servicios","bajas","distribucion","control"] },
   { label: "Personal",    items: ["operarios","personal"] },
-  { label: "Gestión",     items: ["movimientos","prefac","cobranzas","reclamos"] },
+  { label: "Gestión",     items: ["movimientos","prefac","cobranzas","precios","reclamos"] },
   { label: "Comercial",   items: ["comercial","comercial-bajas"] },
   { label: "Sistema",     items: ["config"] },
 ];
@@ -423,6 +582,27 @@ function placeholder(titulo, desc, extra){
 function facDe(svcId){ return APP.facturacion.find(f => f.svcId === svcId) || {}; }
 function distDe(svcId){ return APP.distribucion.find(d => d.svcId === svcId) || { svcId, turnos:[] }; }
 
+// Valor hora REAL de un servicio: si está vinculado a un precio de la lista,
+// devuelve el precio actual de la lista (vínculo vivo). Si no, el valor propio.
+function valorHoraDe(svcId){
+  const fac = facDe(svcId);
+  if(fac.precioId){
+    const p = APP.precios.find(x => x.id === fac.precioId);
+    if(p) return Number(p.neto)||0;   // precio vivo de la lista
+  }
+  return Number(fac.valorHora)||0;    // valor propio (o precio borrado → cae al último guardado)
+}
+
+// Monto fijo REAL de un servicio: vivo de la lista si está vinculado, o propio
+function montoFijoDe(svcId){
+  const fac = facDe(svcId);
+  if(fac.precioId){
+    const p = APP.precios.find(x => x.id === fac.precioId);
+    if(p) return Number(p.neto)||0;   // abono vivo de la lista
+  }
+  return Number(fac.montoFijo)||0;
+}
+
 const DIAS_LETRA = ["Do","Lu","Ma","Mi","Ju","Vi","Sá"];
 function resumenDias(dias){
   if(!dias || !dias.length) return "—";
@@ -450,7 +630,7 @@ function renderServicios(){
       <td><strong>${s.nombre}</strong><br><span style="font-size:10px;color:var(--text3)">${s.tipo||"Consorcio"}</span></td>
       <td style="font-size:11px;color:var(--text2)">${nombreSup(s.supervisorId)}</td>
       <td style="font-size:11px;font-family:monospace">${resumenDist(s.id)}</td>
-      ${verVal?`<td style="font-family:monospace;font-size:11px">${fac.valorHora?"$"+Number(fac.valorHora).toLocaleString("es-AR"):"—"}</td>`:`<td style="color:var(--text3)">—</td>`}
+      ${verVal?`<td style="font-family:monospace;font-size:11px">${valorHoraDe(s.id)?"$"+valorHoraDe(s.id).toLocaleString("es-AR"):"—"}</td>`:`<td style="color:var(--text3)">—</td>`}
       <td style="white-space:nowrap">
         <button class="btn btn-sm" onclick="editarServicio('${s.id}')">${tienePermiso("editar")?"Ver / Editar":"Ver"}</button>
         ${tienePermiso("darBaja")?`<button class="btn btn-sm" onclick="bajaServicio('${s.id}')" style="color:var(--red-txt)">Baja</button>`:""}
@@ -491,7 +671,7 @@ function nuevoServicio(){
     nombre:"", tipo:"Consorcio", cuit:"", mail:"", telefono:"", contacto:"", razonSocial:"", materiales:"sin",
     supervisorId:"", fechaInicio: hoyISO(),
     // facturación
-    valorHora:0, tipoFactura:"A", tipoContrato:"horas", montoFijo:0,
+    valorHora:0, precioId:"", tipoFactura:"A", tipoContrato:"horas", montoFijo:0,
     // distribución
     turnos:[ nuevoTurno() ],
   };
@@ -508,7 +688,7 @@ function editarServicio(id){
     id: s.id,
     nombre: s.nombre, tipo: s.tipo||"Consorcio", cuit: s.cuit||"", mail: s.mail||"", telefono: s.telefono||"", contacto: s.contacto||"", razonSocial: s.razonSocial||"", materiales: s.materiales||"sin",
     supervisorId: s.supervisorId||"", fechaInicio: s.fechaInicio||"",
-    valorHora: fac.valorHora||0, tipoFactura: fac.tipoFactura||"A",
+    valorHora: fac.valorHora||0, precioId: fac.precioId||"", tipoFactura: fac.tipoFactura||"A",
     tipoContrato: fac.tipoContrato||"horas", montoFijo: fac.montoFijo||0,
     turnos: dist.turnos && dist.turnos.length ? JSON.parse(JSON.stringify(dist.turnos)) : [ nuevoTurno() ],
   };
@@ -534,6 +714,69 @@ function horarioDia(turno, dw){
   const esp = (turno.horarioPorDia||{})[dw];
   if(esp && esp.entrada && esp.salida) return { entrada:esp.entrada, salida:esp.salida };
   return { entrada:turno.entrada, salida:turno.salida };
+}
+
+// Selector de precio de la lista para el formulario de servicio
+function selectorPrecio(f){
+  const dis = tienePermiso("editar") ? "" : "disabled";
+  const esFijo = f.tipoContrato === "fijo";
+  const valorActual = esFijo ? Number(f.montoFijo)||0 : Number(f.valorHora)||0;
+  // Solo precios del tipo que corresponde
+  const precios = APP.precios.slice()
+    .filter(p => ((p.tipo||"hora")==="fijo") === esFijo)
+    .sort((a,b)=>(a.nombre||"").localeCompare(b.nombre||"","es"));
+  // Precio seleccionado: por precioId, o por match del valor propio
+  let selId = f.precioId || "";
+  if(!selId && valorActual>0){
+    const match = precios.find(p => Number(p.neto) === valorActual);
+    if(match) selId = match.id;
+  }
+  const opts = precios.map(p => {
+    const neto = Number(p.neto)||0;
+    return `<option value="${p.id}" ${selId===p.id?"selected":""}>${p.nombre} — ${fmtMoneda(neto)} + IVA</option>`;
+  }).join("");
+  const sel = precios.find(p=>p.id===selId);
+  const preview = sel ? `Neto ${fmtMoneda(sel.neto)} · IVA ${fmtMoneda(Math.round(sel.neto*0.21))} · Final ${fmtMoneda(sel.neto+Math.round(sel.neto*0.21))}`
+    : (valorActual>0 ? `Valor actual sin vincular: ${fmtMoneda(valorActual)} — elegí un ${esFijo?"abono":"precio"} de la lista o creá uno` : `Elegí un ${esFijo?"abono":"precio"} de la lista`);
+
+  return `<div style="margin-bottom:14px">
+    <label style="font-size:11px;font-weight:600;color:var(--text2);display:block;margin-bottom:5px;text-transform:uppercase;letter-spacing:0.5px">${esFijo?"Abono / monto fijo (de la lista)":"Valor hora (de la lista de precios)"}</label>
+    <select id="svc-precioId" ${dis} onchange="onCambioPrecioSvc(this.value)" style="width:100%;padding:9px 12px;border:1px solid var(--border2);border-radius:var(--radius);font-size:13px">
+      <option value="">— Elegí un ${esFijo?"abono":"precio"} —</option>
+      ${opts}
+      <option value="__nuevo__">+ Crear ${esFijo?"un abono":"un precio"} nuevo...</option>
+    </select>
+    <div id="svc-precio-preview" style="font-size:11px;color:var(--text3);margin-top:5px">${preview}</div>
+  </div>`;
+}
+
+// Al cambiar el desplegable de precio en el servicio
+function onCambioPrecioSvc(val){
+  const esFijo = FORM_SVC.tipoContrato === "fijo";
+  if(val === "__nuevo__"){
+    const nombre = prompt(`Nombre del nuevo ${esFijo?"abono":"valor"}:`, "");
+    if(!nombre || !nombre.trim()){ render(); return; }
+    const netoStr = prompt(`${esFijo?"Monto fijo":"Valor"} neto (sin IVA) de "${nombre.trim()}":`, "");
+    const neto = parseFloat(netoStr)||0;
+    if(neto <= 0){ alert("Valor inválido"); render(); return; }
+    const id = nuevoId("V");
+    APP.precios.push({ id, nombre:nombre.trim(), neto, tipo: esFijo?"fijo":"hora" });
+    guardarLocal();
+    driveSavePrecio(id);
+    FORM_SVC.precioId = id;
+    if(esFijo) FORM_SVC.montoFijo = neto; else FORM_SVC.valorHora = neto;
+    FORM_SVC.valorHora = neto;
+  } else if(val === ""){
+    FORM_SVC.precioId = "";
+  } else {
+    const p = APP.precios.find(x => x.id === val);
+    if(p){
+      FORM_SVC.precioId = p.id;
+      if(FORM_SVC.tipoContrato === "fijo") FORM_SVC.montoFijo = Number(p.neto)||0;
+      else FORM_SVC.valorHora = Number(p.neto)||0;
+    }
+  }
+  render();
 }
 
 function renderFormSvc(){
@@ -669,9 +912,7 @@ function renderFormSvc(){
             <option value="B" ${f.tipoFactura==="B"?"selected":""}>Tipo B</option>
           </select></div>
       </div>
-      ${f.tipoContrato==="fijo"
-        ? campo("Monto fijo mensual","svc-montoFijo",f.montoFijo,"number","")
-        : campo("Valor hora","svc-valorHora",f.valorHora,"number","")}
+      ${selectorPrecio(f)}
     </div></div>`:""}
 
     <div class="card"><div class="card-header"><h3>Distribución — turnos</h3>
@@ -753,7 +994,7 @@ function guardarServicio(){
   }
 
   // Facturación (hoja 2) — upsert por svcId
-  const facData = { svcId, valorHora:f.valorHora, tipoFactura:f.tipoFactura, tipoContrato:f.tipoContrato, montoFijo:f.montoFijo };
+  const facData = { svcId, valorHora:f.valorHora, precioId:f.precioId||"", tipoFactura:f.tipoFactura, tipoContrato:f.tipoContrato, montoFijo:f.montoFijo };
   const iFac = APP.facturacion.findIndex(x => x.svcId === svcId);
   if(iFac >= 0) APP.facturacion[iFac] = facData; else APP.facturacion.push(facData);
 
@@ -1482,7 +1723,7 @@ function descargarFacturacionMes(){
   svcs.forEach(svc => {
     const f = calcFacturacion(svc.id, APP.mes.y, APP.mes.m);
     const tipo = f.esFijo ? "Monto fijo" : "Tipo "+f.tipoFactura;
-    const vh = f.esFijo ? (facDe(svc.id).montoFijo||0) : f.vh;
+    const vh = f.esFijo ? montoFijoDe(svc.id) : f.vh;
     lineas.push([
       svc.nombre,
       svc.razonSocial||"",
@@ -1782,7 +2023,7 @@ function calcFacturacion(svcId, y, m){
   const res = resumenPlanilla(svcId, y, m);
   const tipoContrato = fac.tipoContrato || "horas";
   const tipoFactura = fac.tipoFactura || "A";
-  const vh = fac.valorHora || 0;
+  const vh = valorHoraDe(svcId);
 
   // hsSimples y hsFeriado son horas REALES. El doble de feriado va en el importe.
   const totalHs = res.hsSimples + res.hsFeriado;
@@ -1790,7 +2031,7 @@ function calcFacturacion(svcId, y, m){
   let subtotal, iva, total, vhMostrar;
 
   if(tipoContrato === "fijo"){
-    const mf = fac.montoFijo || 0;
+    const mf = montoFijoDe(svcId);
     subtotal = mf;
     iva = mf * 0.21;
     total = mf + iva;
@@ -1832,9 +2073,9 @@ function fmtHoras(n){
 // No aplica IVA nunca, sea A o B — es lo facturado de trabajo puro.
 function subtotalPlano(svcId, y, m){
   const fac = facDe(svcId);
-  if((fac.tipoContrato||"horas") === "fijo") return fac.montoFijo || 0;
+  if((fac.tipoContrato||"horas") === "fijo") return montoFijoDe(svcId);
   const res = resumenPlanilla(svcId, y, m);
-  const vh = fac.valorHora || 0;
+  const vh = valorHoraDe(svcId);
   return vh * res.hsSimples + vh * 2 * res.hsFeriado;
 }
 
@@ -1861,7 +2102,7 @@ function renderPrefac(){
       <span style="font-size:10px;color:var(--text3)">${f.esFijo?"Monto fijo":"Tipo "+f.tipoFactura}${svc.cuit?" · "+svc.cuit:""}</span></td>
     <td style="padding:9px 12px;text-align:right;font-family:monospace;font-size:12px">${f.esFijo?"—":fmtHoras(f.hsSimples)}</td>
     <td style="padding:9px 12px;text-align:right;font-family:monospace;font-size:12px">${f.esFijo?"—":fmtHoras(f.hsFeriado)}</td>
-    <td style="padding:9px 12px;text-align:right;font-family:monospace;font-size:12px">${f.esFijo?fmtMoneda(facDe(svc.id).montoFijo||0):fmtMoneda(f.vh)}</td>
+    <td style="padding:9px 12px;text-align:right;font-family:monospace;font-size:12px">${f.esFijo?fmtMoneda(montoFijoDe(svc.id)):fmtMoneda(f.vh)}</td>
     <td style="padding:9px 12px;text-align:right;font-family:monospace;font-size:12px">${fmtMoneda(f.subtotal)}</td>
     <td style="padding:9px 12px;text-align:right;font-family:monospace;font-size:12px;color:var(--text2)">${fmtMoneda(f.iva)}</td>
     <td style="padding:9px 12px;text-align:right;font-family:monospace;font-size:13px;font-weight:600">${fmtMoneda(f.total)}</td>
@@ -2078,7 +2319,7 @@ function renderComercial(){
     </div>`;
 
   const thVal = verVal?`<th style="text-align:right;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Valor hora</th>`:"";
-  const tdVal = (fac) => verVal?`<td style="padding:9px 12px;font-family:monospace;font-size:11px;text-align:right">${fac.tipoContrato==="fijo"?"Fijo: "+fmtMoneda(fac.montoFijo||0):fmtMoneda(fac.valorHora||0)}</td>`:"";
+  const tdVal = (s) => { if(!verVal) return ""; const fac=facDe(s.id); return `<td style="padding:9px 12px;font-family:monospace;font-size:11px;text-align:right">${fac.tipoContrato==="fijo"?"Fijo: "+fmtMoneda(montoFijoDe(s.id)):fmtMoneda(valorHoraDe(s.id))}</td>`; };
 
   // Mes anterior al que se está viendo
   let mAnt = APP.mes.m - 1, yAnt = APP.mes.y;
@@ -2101,7 +2342,7 @@ function renderComercial(){
       <td style="padding:9px 12px;font-size:11px">${s.contacto||"—"}</td>
       <td style="padding:9px 12px;font-size:11px">${s.materiales==="con"?'<span style="background:var(--green-bg);color:var(--green-txt);padding:2px 8px;border-radius:20px;font-size:10px">Con</span>':'<span style="color:var(--text3)">Sin</span>'}</td>
       <td style="padding:9px 12px;font-family:monospace;font-size:11px;text-align:right">${fmtHoras(hsSem)}</td>
-      ${tdVal(fac)}
+      ${tdVal(s)}
       ${tdFact(s.id)}
     </tr>`;
   };
@@ -2176,7 +2417,7 @@ function descargarComercial(){
   const filaDe = (s) => {
     const fac = facDe(s.id);
     const hsSem = horasSemanales(s.id);
-    const vh = verVal ? (fac.tipoContrato==="fijo" ? "Fijo "+Math.round(fac.montoFijo||0) : Math.round(fac.valorHora||0)) : "";
+    const vh = verVal ? (fac.tipoContrato==="fijo" ? "Fijo "+Math.round(montoFijoDe(s.id)) : Math.round(valorHoraDe(s.id))) : "";
     const sub = verVal ? Math.round(subtotalPlano(s.id, yAnt, mAnt)) : "";
     return [s.nombre, s.cuit||"", s.mail||"", s.telefono||"", s.contacto||"", s.materiales==="con"?"Con":"Sin", fmtHoras(hsSem)].concat(verVal?[vh, sub]:[]).join(";");
   };
@@ -3051,6 +3292,455 @@ async function procesarExcelXubio(input){
   input.value = "";
 }
 
+// ============================================================
+// LISTA DE PRECIOS — valores sin IVA, con coincidencias por servicio
+// ============================================================
+const IVA_PCT = 0.21;
+
+// Servicios que usan un valor neto exacto (match por el neto)
+// Valor propio guardado de un servicio (según su tipo de contrato)
+function valorPropioSvc(svcId){
+  const fac = facDe(svcId);
+  return (fac.tipoContrato||"horas")==="fijo" ? Number(fac.montoFijo)||0 : Number(fac.valorHora)||0;
+}
+
+function serviciosConValor(neto, precioId){
+  const precio = APP.precios.find(p => p.id === precioId);
+  const tipoPrecio = precio ? (precio.tipo||"hora") : "hora";
+  return APP.servicios.filter(s => {
+    if(s.estado !== "activo") return false;
+    const fac = facDe(s.id);
+    const esFijo = (fac.tipoContrato||"horas")==="fijo";
+    if(esFijo !== (tipoPrecio==="fijo")) return false; // mismo tipo
+    if(fac.precioId) return fac.precioId === precioId;
+    return valorPropioSvc(s.id) === Number(neto);
+  });
+}
+
+// Servicios activos que NO están vinculados y cuyo valor no coincide con ningún precio de su tipo
+function serviciosFueraDeLista(){
+  const netosHora = new Set(APP.precios.filter(p=>(p.tipo||"hora")!=="fijo").map(p => Number(p.neto)));
+  const netosFijo = new Set(APP.precios.filter(p=>(p.tipo||"hora")==="fijo").map(p => Number(p.neto)));
+  return APP.servicios.filter(s => {
+    if(s.estado !== "activo") return false;
+    const fac = facDe(s.id);
+    if(fac.precioId){
+      return !APP.precios.some(p => p.id === fac.precioId);
+    }
+    const esFijo = (fac.tipoContrato||"horas")==="fijo";
+    const val = valorPropioSvc(s.id);
+    if(val <= 0) return false;
+    return esFijo ? !netosFijo.has(val) : !netosHora.has(val);
+  });
+}
+
+let PRECIO_EXPANDIDO = null; // id del precio con la lista de servicios desplegada
+
+function filaPrecio(p){
+  const neto = Number(p.neto) || 0;
+  const iva = Math.round(neto * IVA_PCT);
+  const final = neto + iva;
+  const svcs = serviciosConValor(neto, p.id);
+  const expandido = PRECIO_EXPANDIDO === p.id;
+  let filaExpandida = "";
+  if(expandido && svcs.length){
+    const chips = svcs.map(s => `<span style="background:var(--surface2);border:0.5px solid var(--border);font-size:12px;padding:3px 9px;border-radius:20px;color:var(--text2)">${s.nombre}</span>`).join("");
+    filaExpandida = `<tr><td colspan="6" style="padding:4px 14px 12px;background:var(--surface2)">
+      <div style="font-size:10px;color:var(--text3);margin:6px 0 6px;text-transform:uppercase">Servicios con este valor</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">${chips}</div>
+    </td></tr>`;
+  }
+  return `<tr>
+    <td style="padding:12px 14px;font-weight:500">${p.nombre||"—"}</td>
+    <td style="padding:12px 14px;text-align:right;font-family:monospace">${fmtMoneda(neto)}</td>
+    <td style="padding:12px 14px;text-align:right;font-family:monospace;color:var(--text2)">${fmtMoneda(iva)}</td>
+    <td style="padding:12px 14px;text-align:right;font-family:monospace;font-weight:500">${fmtMoneda(final)}</td>
+    <td style="padding:12px 14px;text-align:right">${
+      svcs.length
+        ? `<button class="btn btn-sm" onclick="PRECIO_EXPANDIDO=${expandido?"null":`'${p.id}'`};render()" style="background:var(--primary-bg);color:var(--primary);border:none;font-size:12px">${svcs.length} servicio(s) ${expandido?"▲":"▼"}</button>`
+        : `<span style="font-size:12px;color:var(--text3)">sin uso</span>`
+    }</td>
+    <td style="padding:12px 14px;text-align:center;white-space:nowrap">
+      <button class="btn btn-sm" onclick="abrirAumentoPuntual('${p.id}')" title="Aumentar %">📊</button>
+      <button class="btn btn-sm" onclick="editarPrecio('${p.id}')">Editar</button>
+      <button class="btn btn-sm" onclick="eliminarPrecio('${p.id}')" style="color:var(--red-txt)">Borrar</button>
+    </td>
+  </tr>${filaExpandida}`;
+}
+
+function tablaPrecios(lista, tituloCol){
+  const filas = lista.map(filaPrecio).join("");
+  return `<div class="card"><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
+    <thead><tr style="background:var(--surface2)">
+      <th style="text-align:left;padding:10px 14px;font-size:10px;color:var(--text3);text-transform:uppercase">${tituloCol}</th>
+      <th style="text-align:right;padding:10px 14px;font-size:10px;color:var(--text3);text-transform:uppercase">Neto</th>
+      <th style="text-align:right;padding:10px 14px;font-size:10px;color:var(--text3);text-transform:uppercase">IVA 21%</th>
+      <th style="text-align:right;padding:10px 14px;font-size:10px;color:var(--text3);text-transform:uppercase">Final</th>
+      <th style="text-align:right;padding:10px 14px;font-size:10px;color:var(--text3);text-transform:uppercase">En uso</th>
+      <th style="padding:10px 14px"></th>
+    </tr></thead>
+    <tbody>${filas || `<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text3)">Sin valores en esta sección.</td></tr>`}</tbody>
+  </table></div></div>`;
+}
+
+function renderPrecios(){
+  const todos = APP.precios.slice().sort((a,b) => (a.nombre||"").localeCompare(b.nombre||"","es"));
+  const porHora = todos.filter(p => (p.tipo||"hora") !== "fijo");
+  const abonos = todos.filter(p => (p.tipo||"hora") === "fijo");
+  const fuera = serviciosFueraDeLista();
+
+  let bloqueFuera = "";
+  if(fuera.length){
+    const chips = fuera.map(s => {
+      const fac = facDe(s.id);
+      const esFijo = (fac.tipoContrato||"horas")==="fijo";
+      const monto = esFijo ? Number(fac.montoFijo)||0 : Number(fac.valorHora)||0;
+      return `<span style="background:var(--surface);border:0.5px solid var(--border);font-size:12px;padding:3px 9px;border-radius:20px;color:var(--text2)">${s.nombre} · ${fmtMoneda(monto)}${esFijo?" (fijo)":""}</span>`;
+    }).join("");
+    bloqueFuera = `<div class="card" style="background:var(--amber-bg);border:0.5px solid var(--amber-txt);margin-top:16px">
+      <div style="padding:14px 16px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+          <span style="font-weight:500;color:var(--amber-txt)">⚠️ ${fuera.length} servicio(s) fuera de la lista</span>
+        </div>
+        <div style="font-size:12px;color:var(--amber-txt);margin-bottom:10px">Su valor no coincide con ningún precio de la lista. Revisá si es un precio distinto o un tema de redondeo.</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">${chips}</div>
+      </div>
+    </div>`;
+  }
+
+  return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <div style="font-size:12px;color:var(--text2)">Los valores se cargan sin IVA. El final se calcula solo.</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn" onclick="verHistorialAumentos()">📈 Historial</button>
+        <button class="btn" onclick="abrirAumentoGeneral()">📊 Aumento general</button>
+        <button class="btn" onclick="vincularServiciosAuto()">🔗 Vincular servicios que coinciden</button>
+      </div>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <h3 style="font-size:14px;font-weight:500">Valores por hora</h3>
+      <button class="btn btn-sm btn-primary" onclick="nuevoPrecio('hora')">+ Nuevo valor por hora</button>
+    </div>
+    ${tablaPrecios(porHora, "Valor por hora")}
+    <div style="display:flex;justify-content:space-between;align-items:center;margin:20px 0 8px">
+      <h3 style="font-size:14px;font-weight:500">Abonos (monto fijo)</h3>
+      <button class="btn btn-sm btn-primary" onclick="nuevoPrecio('fijo')">+ Nuevo abono</button>
+    </div>
+    ${tablaPrecios(abonos, "Abono / monto fijo")}
+    ${bloqueFuera}`;
+}
+
+function nuevoPrecio(tipo){ abrirModalPrecio(null, tipo||"hora"); }
+function editarPrecio(id){ abrirModalPrecio(id); }
+
+function abrirModalPrecio(id, tipoNuevo){
+  const p = id ? APP.precios.find(x => x.id === id) : null;
+  const tipo = p ? (p.tipo||"hora") : (tipoNuevo||"hora");
+  const esFijo = tipo === "fijo";
+  const modal = document.getElementById("modal");
+  const neto = p ? Number(p.neto)||0 : 0;
+  modal.innerHTML = `
+    <div class="modal-backdrop" onclick="cerrarModal()"></div>
+    <div class="modal-box">
+      <div class="modal-title">${p ? "Editar" : "Nuevo"} ${esFijo?"abono (monto fijo)":"valor por hora"}</div>
+      <div class="modal-field"><label>Nombre</label>
+        <input id="precio-nombre" type="text" value="${p?p.nombre:""}" placeholder="${esFijo?"Ej: Abono edificio chico":"Ej: Hora maestranza"}"></div>
+      <div class="modal-field"><label>${esFijo?"Monto fijo neto (sin IVA)":"Valor neto (sin IVA)"}</label>
+        <input id="precio-neto" type="number" value="${neto||""}" placeholder="0" oninput="previewPrecio()"></div>
+      <input type="hidden" id="precio-tipo" value="${tipo}">
+      <div id="precio-preview" style="background:var(--surface2);border-radius:var(--radius);padding:12px;font-size:12px;margin-bottom:14px">
+        ${previewTextoPrecio(neto)}
+      </div>
+      <div class="modal-actions">
+        <button class="btn" onclick="cerrarModal()">Cancelar</button>
+        <button class="btn btn-primary" onclick="guardarPrecio('${id||""}')">${p?"Guardar":"Crear"}</button>
+      </div>
+    </div>`;
+  modal.style.display = "flex";
+}
+
+function previewTextoPrecio(neto){
+  neto = Number(neto)||0;
+  const iva = Math.round(neto * IVA_PCT);
+  const final = neto + iva;
+  return `<div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:var(--text2)">Neto:</span><span style="font-family:monospace">${fmtMoneda(neto)}</span></div>
+    <div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:var(--text2)">IVA 21%:</span><span style="font-family:monospace">${fmtMoneda(iva)}</span></div>
+    <div style="display:flex;justify-content:space-between;padding:4px 0;border-top:0.5px solid var(--border);margin-top:4px;font-weight:600"><span>Final:</span><span style="font-family:monospace">${fmtMoneda(final)}</span></div>`;
+}
+
+function previewPrecio(){
+  const neto = parseFloat(document.getElementById("precio-neto").value)||0;
+  const el = document.getElementById("precio-preview");
+  if(el) el.innerHTML = previewTextoPrecio(neto);
+}
+
+function guardarPrecio(id){
+  const nombre = document.getElementById("precio-nombre").value.trim();
+  const neto = parseFloat(document.getElementById("precio-neto").value)||0;
+  const tipoEl = document.getElementById("precio-tipo");
+  const tipo = tipoEl ? tipoEl.value : "hora";
+  if(!nombre){ alert("Ingresá un nombre"); return; }
+  if(neto <= 0){ alert("Ingresá un valor neto mayor a cero"); return; }
+
+  let recId = id;
+  if(id){
+    APP.precios = APP.precios.map(p => p.id===id ? {...p, nombre, neto, tipo} : p);
+  } else {
+    recId = nuevoId("V");
+    APP.precios.push({ id:recId, nombre, neto, tipo });
+  }
+  guardarLocal();
+  driveSavePrecio(recId);
+  cerrarModal();
+  render();
+}
+
+function eliminarPrecio(id){
+  const p = APP.precios.find(x => x.id === id);
+  if(!p) return;
+  if(!confirm(`¿Borrar el valor "${p.nombre}"? No afecta a los servicios, solo lo saca de la lista.`)) return;
+  APP.precios = APP.precios.filter(x => x.id !== id);
+  guardarLocal();
+  driveDeletePrecio(id);
+  render();
+}
+
+// Paso intermedio: vincular automáticamente los servicios cuyo valor
+// coincide exacto con un precio de la lista, pero que todavía no están vinculados
+function vincularServiciosAuto(){
+  // Índices separados por tipo: neto → precioId
+  const netoHora = {}, netoFijo = {};
+  APP.precios.forEach(p => {
+    if((p.tipo||"hora")==="fijo") netoFijo[Number(p.neto)] = p.id;
+    else netoHora[Number(p.neto)] = p.id;
+  });
+
+  let vinculados = 0;
+  const paraGuardar = [];
+  APP.servicios.forEach(s => {
+    if(s.estado !== "activo") return;
+    const fac = facDe(s.id);
+    if(fac.precioId) return; // ya vinculado
+    const esFijo = (fac.tipoContrato||"horas")==="fijo";
+    const val = esFijo ? (Number(fac.montoFijo)||0) : (Number(fac.valorHora)||0);
+    const pid = esFijo ? netoFijo[val] : netoHora[val];
+    if(pid){
+      const iFac = APP.facturacion.findIndex(x => x.svcId === s.id);
+      if(iFac >= 0){ APP.facturacion[iFac] = {...APP.facturacion[iFac], precioId:pid}; }
+      else { APP.facturacion.push({ svcId:s.id, valorHora:esFijo?0:val, montoFijo:esFijo?val:0, precioId:pid, tipoFactura:"A", tipoContrato:esFijo?"fijo":"horas" }); }
+      paraGuardar.push(s.id);
+      vinculados++;
+    }
+  });
+
+  if(!vinculados){
+    alert("No hay servicios sin vincular que coincidan con un precio de la lista.\n\n(O ya están todos vinculados, o los que quedan tienen valores que no están en la lista — mirá el bloque ámbar.)");
+    return;
+  }
+  guardarLocal();
+  render();
+  paraGuardar.forEach(id => driveSaveServicio(id));
+  alert(`✅ ${vinculados} servicio(s) vinculados automáticamente a su precio de la lista.`);
+}
+
+// ============================================================
+// AUMENTOS — puntual y general, con simulación e historial
+// ============================================================
+
+// Aumento puntual: un precio específico
+function abrirAumentoPuntual(id){
+  const p = APP.precios.find(x => x.id === id);
+  if(!p) return;
+  mostrarModalAumento([p], "puntual", `Aumentar "${p.nombre}"`);
+}
+
+// Aumento general: todos los precios
+function abrirAumentoGeneral(){
+  if(!APP.precios.length){ alert("No hay precios en la lista para aumentar."); return; }
+  mostrarModalAumento(APP.precios.slice(), "general", "Aumento general a toda la lista");
+}
+
+// Modal con simulación: ves cómo quedaría antes de aplicar
+function mostrarModalAumento(precios, tipo, titulo){
+  const modal = document.getElementById("modal");
+  modal.innerHTML = `
+    <div class="modal-backdrop" onclick="cerrarModal()"></div>
+    <div class="modal-box" style="max-width:560px">
+      <div class="modal-title">${titulo}</div>
+      <div class="modal-field"><label>Porcentaje de aumento</label>
+        <input id="aum-pct" type="number" step="0.1" placeholder="Ej: 10" oninput="simularAumento('${tipo}')">
+      </div>
+      <div id="aum-preview" style="max-height:320px;overflow-y:auto;margin-bottom:14px"></div>
+      <div class="modal-actions">
+        <button class="btn" onclick="cerrarModal()">Cancelar</button>
+        <button class="btn btn-primary" onclick="aplicarAumento('${tipo}')">Aplicar aumento</button>
+      </div>
+    </div>`;
+  modal.style.display = "flex";
+  // Guardar en memoria qué precios entran en este aumento
+  AUMENTO_PRECIOS = precios.map(p => p.id);
+}
+
+let AUMENTO_PRECIOS = [];
+
+// Un servicio de ejemplo vinculado a un precio (para mostrar impacto)
+function servicioEjemploDePrecio(precioId){
+  return APP.servicios.find(s => {
+    if(s.estado!=="activo") return false;
+    return facDe(s.id).precioId === precioId;
+  });
+}
+
+function simularAumento(tipo){
+  const pct = parseFloat(document.getElementById("aum-pct").value)||0;
+  const el = document.getElementById("aum-preview");
+  if(!el) return;
+  if(!pct){ el.innerHTML = `<div style="font-size:12px;color:var(--text3);padding:8px 0">Ingresá un porcentaje para ver la simulación.</div>`; return; }
+
+  const precios = APP.precios.filter(p => AUMENTO_PRECIOS.includes(p.id))
+    .sort((a,b)=>(a.nombre||"").localeCompare(b.nombre||"","es"));
+
+  const filas = precios.map(p => {
+    const viejo = Number(p.neto)||0;
+    const nuevo = Math.round(viejo * (1 + pct/100));
+    const svc = servicioEjemploDePrecio(p.id);
+    let ejemplo = "";
+    if(svc){
+      // Impacto con las horas del mes actual
+      const subViejo = subtotalPlano(svc.id, APP.mes.y, APP.mes.m);
+      // Simular con el nuevo valor (temporalmente)
+      const res = resumenPlanilla(svc.id, APP.mes.y, APP.mes.m);
+      const subNuevo = nuevo * res.hsSimples + nuevo * 2 * res.hsFeriado;
+      ejemplo = `<div style="font-size:10px;color:var(--text3);margin-top:2px">ej: ${svc.nombre} · ${fmtMoneda(subViejo)} → ${fmtMoneda(subNuevo)} (mes actual)</div>`;
+    }
+    return `<div style="padding:8px 0;border-bottom:0.5px solid var(--border)">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span style="font-weight:500;font-size:13px">${p.nombre}</span>
+        <span style="font-family:monospace;font-size:13px">${fmtMoneda(viejo)} → <strong style="color:var(--green-txt)">${fmtMoneda(nuevo)}</strong></span>
+      </div>
+      ${ejemplo}
+    </div>`;
+  }).join("");
+
+  el.innerHTML = `<div style="font-size:11px;color:var(--text3);text-transform:uppercase;margin-bottom:4px">Así quedarían ${precios.length} precio(s)</div>${filas}`;
+}
+
+function aplicarAumento(tipo){
+  const pct = parseFloat(document.getElementById("aum-pct").value)||0;
+  if(!pct){ alert("Ingresá un porcentaje"); return; }
+  if(!confirm(`¿Aplicar un aumento del ${pct}% a ${AUMENTO_PRECIOS.length} precio(s)? Se propaga a todos los servicios vinculados.`)) return;
+
+  // Guardar el estado anterior de cada precio (para regresión)
+  const detalle = [];
+  AUMENTO_PRECIOS.forEach(pid => {
+    const p = APP.precios.find(x => x.id === pid);
+    if(!p) return;
+    const viejo = Number(p.neto)||0;
+    const nuevo = Math.round(viejo * (1 + pct/100));
+    detalle.push({ precioId:pid, nombre:p.nombre, netoAnterior:viejo, netoNuevo:nuevo });
+  });
+
+  // Aplicar
+  const idsAfectados = [];
+  detalle.forEach(d => {
+    APP.precios = APP.precios.map(p => p.id===d.precioId ? {...p, neto:d.netoNuevo} : p);
+    idsAfectados.push(d.precioId);
+  });
+
+  // Registrar en el historial
+  const aumId = nuevoId("A");
+  const registro = {
+    id: aumId,
+    fecha: hoyISO(),
+    tipo,
+    pct,
+    detalle: JSON.stringify(detalle),
+    quien: APP.auth.usuario,
+    timestamp: new Date().toISOString(),
+    revertido: false,
+  };
+  APP.aumentos.push(registro);
+
+  guardarLocal();
+  driveSaveAumento(aumId);
+  idsAfectados.forEach(id => driveSavePrecio(id));
+  cerrarModal();
+  render();
+  alert(`✅ Aumento del ${pct}% aplicado a ${detalle.length} precio(s). Ya se refleja en los servicios vinculados.`);
+}
+
+// ============================================================
+// HISTORIAL DE AUMENTOS + regresión
+// ============================================================
+function verHistorialAumentos(){
+  APP.screen = "aumentos-historial";
+  render();
+}
+
+function renderHistorialAumentos(){
+  const aumentos = APP.aumentos.slice().sort((a,b)=>(b.timestamp||"").localeCompare(a.timestamp||""));
+
+  const filas = aumentos.map(a => {
+    let detalle = [];
+    try{ detalle = JSON.parse(a.detalle||"[]"); }catch(e){}
+    const resumen = detalle.slice(0,3).map(d => `${d.nombre}: ${fmtMoneda(d.netoAnterior)}→${fmtMoneda(d.netoNuevo)}`).join(" · ")
+      + (detalle.length>3?` +${detalle.length-3} más`:"");
+    return `<tr style="${a.revertido?'opacity:0.5':''}">
+      <td style="padding:10px 12px;font-family:monospace;font-size:11px">${(a.fecha||"").split("-").reverse().join("/")}</td>
+      <td style="padding:10px 12px;font-size:12px">${a.tipo==="general"?"General":"Puntual"}</td>
+      <td style="padding:10px 12px;font-family:monospace;font-size:13px;font-weight:500">+${a.pct}%</td>
+      <td style="padding:10px 12px;font-size:11px;color:var(--text3);max-width:280px">${resumen}</td>
+      <td style="padding:10px 12px;font-size:11px;color:var(--text2)">${a.quien||"—"}</td>
+      <td style="padding:10px 12px;text-align:right">
+        ${a.revertido
+          ? `<span style="font-size:11px;color:var(--text3)">revertido</span>`
+          : `<button class="btn btn-sm" onclick="revertirAumento('${a.id}')" style="color:var(--red-txt)">Deshacer</button>`}
+      </td>
+    </tr>`;
+  }).join("");
+
+  return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+      <button class="btn btn-sm" onclick="APP.screen='precios';render()">‹ Volver a la lista</button>
+      <h2 style="font-size:16px;font-weight:500">Historial de aumentos</h2>
+    </div>
+    <div class="card"><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
+      <thead><tr style="background:var(--surface2)">
+        <th style="text-align:left;padding:9px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Fecha</th>
+        <th style="text-align:left;padding:9px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Tipo</th>
+        <th style="text-align:left;padding:9px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">%</th>
+        <th style="text-align:left;padding:9px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Detalle</th>
+        <th style="text-align:left;padding:9px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Quién</th>
+        <th style="padding:9px 12px"></th>
+      </tr></thead>
+      <tbody>${filas || `<tr><td colspan="6" style="text-align:center;padding:32px;color:var(--text3)">Todavía no se hicieron aumentos.</td></tr>`}</tbody>
+    </table></div></div>`;
+}
+
+function revertirAumento(id){
+  const a = APP.aumentos.find(x => x.id === id);
+  if(!a || a.revertido) return;
+  let detalle = [];
+  try{ detalle = JSON.parse(a.detalle||"[]"); }catch(e){}
+  if(!detalle.length){ alert("No hay detalle para revertir este aumento."); return; }
+  if(!confirm(`¿Deshacer el aumento del ${a.pct}%? Los ${detalle.length} precio(s) vuelven a su valor anterior, y eso se propaga a los servicios vinculados.`)) return;
+
+  const idsAfectados = [];
+  detalle.forEach(d => {
+    // Solo restaurar si el precio todavía existe y está en el valor que dejó este aumento
+    const p = APP.precios.find(x => x.id === d.precioId);
+    if(p){
+      APP.precios = APP.precios.map(x => x.id===d.precioId ? {...x, neto:d.netoAnterior} : x);
+      idsAfectados.push(d.precioId);
+    }
+  });
+
+  APP.aumentos = APP.aumentos.map(x => x.id===id ? {...x, revertido:true} : x);
+  guardarLocal();
+  driveSaveAumento(id);
+  idsAfectados.forEach(pid => driveSavePrecio(pid));
+  render();
+  alert(`✅ Aumento deshecho. ${idsAfectados.length} precio(s) restaurados a su valor anterior.`);
+}
+
 function renderConfig(){
   return `
     <div class="card"><div class="card-header"><h3>📥 Importar servicios desde backup</h3></div>
@@ -3237,6 +3927,8 @@ const RENDERERS = {
   movimientos: renderMovimientos,
   prefac: renderPrefac,
   cobranzas: renderCobranzas,
+  precios: renderPrecios,
+  "aumentos-historial": renderHistorialAumentos,
   reclamos: renderReclamos,
   comercial: renderComercial,
   "comercial-bajas": renderComercialBajas,
@@ -3265,7 +3957,7 @@ function render(){
 
   // Si la pantalla actual no está permitida, ir a la primera permitida
   // (form-svc es sub-pantalla de servicios)
-  const subPantallas = { "form-svc":"servicios", "planilla-op":"operarios" };
+  const subPantallas = { "form-svc":"servicios", "planilla-op":"operarios", "aumentos-historial":"precios" };
   const screenBase = subPantallas[APP.screen] || APP.screen;
   if(!puedeVer(screenBase)){
     const primera = PERMISOS[APP.auth.perfil].screens[0];
@@ -3329,6 +4021,7 @@ function hsEntreHorarios(entrada, salida){
 // ARRANQUE
 // ============================================================
 document.addEventListener("DOMContentLoaded", async () => {
+  pintarBanner("pending");  // cartel del entorno esperado, desde el primer segundo
   cargarLocal();       // primero lo local (rápido)
   restaurarSesion();
   render();
