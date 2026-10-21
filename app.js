@@ -583,7 +583,7 @@ function facDe(svcId){ return APP.facturacion.find(f => f.svcId === svcId) || {}
 
 // Período de facturación del servicio: "30" (día 30, la mayoría) o "15" (día 15, los nuevos).
 // Si el servicio no tiene período guardado, se asume "30".
-function periodoDe(svcId){ const p = facDe(svcId).periodoFac; return (p === "15") ? "15" : "30"; }
+function periodoDe(svcId){ return (String(facDe(svcId).periodoFac).trim() === "15") ? "15" : "30"; }
 const PERIODO_LABEL = { "30":"Día 30", "15":"Día 15" };
 function distDe(svcId){ return APP.distribucion.find(d => d.svcId === svcId) || { svcId, turnos:[] }; }
 
@@ -703,7 +703,7 @@ function editarServicio(id){
     nombre: s.nombre, tipo: s.tipo||"Consorcio", cuit: s.cuit||"", mail: s.mail||"", telefono: s.telefono||"", contacto: s.contacto||"", razonSocial: s.razonSocial||"", materiales: s.materiales||"sin",
     supervisorId: s.supervisorId||"", fechaInicio: s.fechaInicio||"",
     valorHora: fac.valorHora||0, precioId: fac.precioId||"", tipoFactura: fac.tipoFactura||"A",
-    tipoContrato: fac.tipoContrato||"horas", montoFijo: fac.montoFijo||0, periodoFac: (fac.periodoFac==="15"?"15":"30"),
+    tipoContrato: fac.tipoContrato||"horas", montoFijo: fac.montoFijo||0, periodoFac: (String(fac.periodoFac).trim()==="15"?"15":"30"),
     turnos: dist.turnos && dist.turnos.length ? JSON.parse(JSON.stringify(dist.turnos)) : [ nuevoTurno() ],
   };
   APP.screen = "form-svc";
@@ -929,8 +929,8 @@ function renderFormSvc(){
       <div style="margin-bottom:14px">
         <label style="font-size:11px;font-weight:600;color:var(--text2);display:block;margin-bottom:5px;text-transform:uppercase;letter-spacing:0.5px">Período de facturación</label>
         <select id="svc-periodoFac" ${dis} style="width:100%;padding:9px 12px;border:1px solid var(--border2);border-radius:var(--radius);font-size:13px">
-          <option value="30" ${f.periodoFac!=="15"?"selected":""}>Día 30 — cierre a fin de mes (la mayoría)</option>
-          <option value="15" ${f.periodoFac==="15"?"selected":""}>Día 15 — se factura el mes completo</option>
+          <option value="30" ${String(f.periodoFac).trim()!=="15"?"selected":""}>Día 30 — cierre a fin de mes (la mayoría)</option>
+          <option value="15" ${String(f.periodoFac).trim()==="15"?"selected":""}>Día 15 — se factura el mes completo</option>
         </select>
         <div style="font-size:10px;color:var(--text3);margin-top:4px">En prefacturación vas a poder separar los servicios por este período.</div>
       </div>
@@ -1025,7 +1025,7 @@ function guardarServicio(){
   }
 
   // Facturación (hoja 2) — upsert por svcId
-  const facData = { svcId, valorHora:f.valorHora, precioId:f.precioId||"", tipoFactura:f.tipoFactura, tipoContrato:f.tipoContrato, montoFijo:f.montoFijo, periodoFac:(f.periodoFac==="15"?"15":"30") };
+  const facData = { svcId, valorHora:f.valorHora, precioId:f.precioId||"", tipoFactura:f.tipoFactura, tipoContrato:f.tipoContrato, montoFijo:f.montoFijo, periodoFac:(String(f.periodoFac).trim()==="15"?"15":"30") };
   const iFac = APP.facturacion.findIndex(x => x.svcId === svcId);
   if(iFac >= 0) APP.facturacion[iFac] = facData; else APP.facturacion.push(facData);
 
