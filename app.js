@@ -598,6 +598,15 @@ function valorHoraDe(svcId){
   return Number(fac.valorHora)||0;    // valor propio (o precio borrado → cae al último guardado)
 }
 
+// Devuelve el id de un precio de la lista cuyo neto coincide EXACTO con el valor
+// dado y es del mismo tipo (hora/fijo). "" si no hay coincidencia.
+function matchPrecioId(esFijo, valor){
+  const v = Number(valor)||0;
+  if(v <= 0) return "";
+  const p = APP.precios.find(x => (((x.tipo||"hora")==="fijo") === esFijo) && Number(x.neto) === v);
+  return p ? p.id : "";
+}
+
 // Monto fijo REAL de un servicio: vivo de la lista si está vinculado, o propio
 function montoFijoDe(svcId){
   const fac = facDe(svcId);
@@ -1005,6 +1014,14 @@ function guardarServicio(){
       razonSocial:f.razonSocial, supervisorId:f.supervisorId, fechaInicio:f.fechaInicio,
       estado:"activo", fechaBaja:"", motivoBaja:"",
     });
+  }
+
+  // Si quedó sin vincular pero su valor coincide EXACTO con un precio de la lista,
+  // adoptar ese vínculo (evita el "vínculo fantasma" que no sigue los aumentos).
+  if(!f.precioId){
+    const esFijo = f.tipoContrato === "fijo";
+    const mid = matchPrecioId(esFijo, esFijo ? f.montoFijo : f.valorHora);
+    if(mid) f.precioId = mid;
   }
 
   // Facturación (hoja 2) — upsert por svcId
@@ -3687,6 +3704,29 @@ function aplicarAumento(tipo){
     detalle.push({ precioId:pid, nombre:p.nombre, netoAnterior:viejo, netoNuevo:nuevo });
   });
 
+  // Antes de aplicar: enganchar los servicios que están "vinculados por valor"
+  // (su valor propio coincide con el precio pero no tenían precioId guardado).
+  // Si no, el aumento no los alcanzaría y habría que revincularlos a mano.
+  const svcRelink = [];
+  detalle.forEach(d => {
+    const precio = APP.precios.find(x => x.id === d.precioId);
+    const esFijo = !!(precio && (precio.tipo||"hora")==="fijo");
+    APP.servicios.forEach(s => {
+      if(s.estado !== "activo") return;
+      const fac = facDe(s.id);
+      if(fac.precioId) return;                                   // ya vinculado de verdad
+      const facFijo = (fac.tipoContrato||"horas")==="fijo";
+      if(facFijo !== esFijo) return;                             // distinto tipo
+      const val = esFijo ? (Number(fac.montoFijo)||0) : (Number(fac.valorHora)||0);
+      if(val === d.netoAnterior){
+        const i = APP.facturacion.findIndex(x => x.svcId === s.id);
+        if(i >= 0) APP.facturacion[i] = {...APP.facturacion[i], precioId:d.precioId};
+        else APP.facturacion.push({ svcId:s.id, valorHora:esFijo?0:val, montoFijo:esFijo?val:0, precioId:d.precioId, tipoFactura:"A", tipoContrato:esFijo?"fijo":"horas", periodoFac:"30" });
+        if(!svcRelink.includes(s.id)) svcRelink.push(s.id);
+      }
+    });
+  });
+
   // Aplicar
   const idsAfectados = [];
   detalle.forEach(d => {
@@ -3711,9 +3751,11 @@ function aplicarAumento(tipo){
   guardarLocal();
   driveSaveAumento(aumId);
   idsAfectados.forEach(id => driveSavePrecio(id));
+  svcRelink.forEach(id => driveSaveServicio(id));   // persistir los vínculos reenganchados
   cerrarModal();
   render();
-  alert(`✅ Aumento del ${pct}% aplicado a ${detalle.length} precio(s). Ya se refleja en los servicios vinculados.`);
+  const extra = svcRelink.length ? `\n\nAdemás se vincularon automáticamente ${svcRelink.length} servicio(s) que coincidían por valor y no estaban enganchados.` : "";
+  alert(`✅ Aumento del ${pct}% aplicado a ${detalle.length} precio(s). Ya se refleja en los servicios vinculados.${extra}`);
 }
 
 // ============================================================
