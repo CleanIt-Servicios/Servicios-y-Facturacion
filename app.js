@@ -580,6 +580,11 @@ function placeholder(titulo, desc, extra){
 }
 
 function facDe(svcId){ return APP.facturacion.find(f => f.svcId === svcId) || {}; }
+
+// Período de facturación del servicio: "30" (día 30, la mayoría) o "15" (día 15, los nuevos).
+// Si el servicio no tiene período guardado, se asume "30".
+function periodoDe(svcId){ const p = facDe(svcId).periodoFac; return (p === "15") ? "15" : "30"; }
+const PERIODO_LABEL = { "30":"Día 30", "15":"Día 15" };
 function distDe(svcId){ return APP.distribucion.find(d => d.svcId === svcId) || { svcId, turnos:[] }; }
 
 // Valor hora REAL de un servicio: si está vinculado a un precio de la lista,
@@ -671,7 +676,7 @@ function nuevoServicio(){
     nombre:"", tipo:"Consorcio", cuit:"", mail:"", telefono:"", contacto:"", razonSocial:"", materiales:"sin",
     supervisorId:"", fechaInicio: hoyISO(),
     // facturación
-    valorHora:0, precioId:"", tipoFactura:"A", tipoContrato:"horas", montoFijo:0,
+    valorHora:0, precioId:"", tipoFactura:"A", tipoContrato:"horas", montoFijo:0, periodoFac:"30",
     // distribución
     turnos:[ nuevoTurno() ],
   };
@@ -689,7 +694,7 @@ function editarServicio(id){
     nombre: s.nombre, tipo: s.tipo||"Consorcio", cuit: s.cuit||"", mail: s.mail||"", telefono: s.telefono||"", contacto: s.contacto||"", razonSocial: s.razonSocial||"", materiales: s.materiales||"sin",
     supervisorId: s.supervisorId||"", fechaInicio: s.fechaInicio||"",
     valorHora: fac.valorHora||0, precioId: fac.precioId||"", tipoFactura: fac.tipoFactura||"A",
-    tipoContrato: fac.tipoContrato||"horas", montoFijo: fac.montoFijo||0,
+    tipoContrato: fac.tipoContrato||"horas", montoFijo: fac.montoFijo||0, periodoFac: (fac.periodoFac==="15"?"15":"30"),
     turnos: dist.turnos && dist.turnos.length ? JSON.parse(JSON.stringify(dist.turnos)) : [ nuevoTurno() ],
   };
   APP.screen = "form-svc";
@@ -912,6 +917,14 @@ function renderFormSvc(){
             <option value="B" ${f.tipoFactura==="B"?"selected":""}>Tipo B</option>
           </select></div>
       </div>
+      <div style="margin-bottom:14px">
+        <label style="font-size:11px;font-weight:600;color:var(--text2);display:block;margin-bottom:5px;text-transform:uppercase;letter-spacing:0.5px">Período de facturación</label>
+        <select id="svc-periodoFac" ${dis} style="width:100%;padding:9px 12px;border:1px solid var(--border2);border-radius:var(--radius);font-size:13px">
+          <option value="30" ${f.periodoFac!=="15"?"selected":""}>Día 30 — cierre a fin de mes (la mayoría)</option>
+          <option value="15" ${f.periodoFac==="15"?"selected":""}>Día 15 — se factura el mes completo</option>
+        </select>
+        <div style="font-size:10px;color:var(--text3);margin-top:4px">En prefacturación vas a poder separar los servicios por este período.</div>
+      </div>
       ${selectorPrecio(f)}
     </div></div>`:""}
 
@@ -961,6 +974,7 @@ function sincronizarFormDesdeDOM(){
   if(g("svc-contacto")) FORM_SVC.contacto = g("svc-contacto").value.trim();
   if(g("svc-materiales")) FORM_SVC.materiales = g("svc-materiales").value;
   if(g("svc-tipoFactura")) FORM_SVC.tipoFactura = g("svc-tipoFactura").value;
+  if(g("svc-periodoFac")) FORM_SVC.periodoFac = g("svc-periodoFac").value;
   if(g("svc-valorHora")) FORM_SVC.valorHora = parseFloat(g("svc-valorHora").value)||0;
   if(g("svc-montoFijo")) FORM_SVC.montoFijo = parseFloat(g("svc-montoFijo").value)||0;
 }
@@ -994,7 +1008,7 @@ function guardarServicio(){
   }
 
   // Facturación (hoja 2) — upsert por svcId
-  const facData = { svcId, valorHora:f.valorHora, precioId:f.precioId||"", tipoFactura:f.tipoFactura, tipoContrato:f.tipoContrato, montoFijo:f.montoFijo };
+  const facData = { svcId, valorHora:f.valorHora, precioId:f.precioId||"", tipoFactura:f.tipoFactura, tipoContrato:f.tipoContrato, montoFijo:f.montoFijo, periodoFac:(f.periodoFac==="15"?"15":"30") };
   const iFac = APP.facturacion.findIndex(x => x.svcId === svcId);
   if(iFac >= 0) APP.facturacion[iFac] = facData; else APP.facturacion.push(facData);
 
@@ -1709,14 +1723,16 @@ function descargarCSV(lineas, nombreArchivo){
 // DESCARGA DE FACTURACIÓN DEL MES — todos los servicios juntos
 // ============================================================
 function descargarFacturacionMes(){
-  const svcs = APP.servicios.filter(s => s.estado==="activo")
+  let svcs = APP.servicios.filter(s => s.estado==="activo")
     .sort((a,b)=>a.nombre.localeCompare(b.nombre,"es"));
-  if(!svcs.length){ alert("No hay servicios para facturar este mes."); return; }
+  if(PREFAC_PERIODO !== "todos") svcs = svcs.filter(s => periodoDe(s.id) === PREFAC_PERIODO);
+  if(!svcs.length){ alert("No hay servicios para facturar en este período."); return; }
 
+  const etiqueta = PREFAC_PERIODO==="todos" ? "Todos los períodos" : "Período "+PERIODO_LABEL[PREFAC_PERIODO];
   let lineas = [];
-  lineas.push(`Facturación;${MESES[APP.mes.m]} ${APP.mes.y}`);
+  lineas.push(`Facturación;${MESES[APP.mes.m]} ${APP.mes.y};${etiqueta}`);
   lineas.push("");
-  lineas.push("Servicio;Razón social;CUIT;Tipo;Hs simples;Hs feriado;Valor hora;Subtotal;IVA;Total");
+  lineas.push("Servicio;Período;Razón social;CUIT;Tipo;Hs simples;Hs feriado;Valor hora;Subtotal;IVA;Total");
 
   let tSimples=0, tFeriado=0, tSubtotal=0, tIva=0, tTotal=0;
 
@@ -1726,6 +1742,7 @@ function descargarFacturacionMes(){
     const vh = f.esFijo ? montoFijoDe(svc.id) : f.vh;
     lineas.push([
       svc.nombre,
+      PERIODO_LABEL[periodoDe(svc.id)],
       svc.razonSocial||"",
       svc.cuit||"",
       tipo,
@@ -1742,12 +1759,13 @@ function descargarFacturacionMes(){
 
   lineas.push("");
   lineas.push([
-    "TOTALES","","","",
+    "TOTALES","","","","",
     fmtHoras(tSimples), fmtHoras(tFeriado), "",
     Math.round(tSubtotal), Math.round(tIva), Math.round(tTotal),
   ].join(";"));
 
-  descargarCSV(lineas, `Facturacion_${MESES[APP.mes.m]}_${APP.mes.y}.csv`);
+  const sufijo = PREFAC_PERIODO==="todos" ? "" : "_Dia"+PREFAC_PERIODO;
+  descargarCSV(lineas, `Facturacion_${MESES[APP.mes.m]}_${APP.mes.y}${sufijo}.csv`);
 }
 
 // ============================================================
@@ -2079,11 +2097,24 @@ function subtotalPlano(svcId, y, m){
   return vh * res.hsSimples + vh * 2 * res.hsFeriado;
 }
 
+// Filtro de período activo en prefacturación: "todos" | "30" | "15"
+let PREFAC_PERIODO = "todos";
+function setPrefacPeriodo(p){ PREFAC_PERIODO = p; render(); }
+
 function renderPrefac(){
-  const svcs = APP.servicios.filter(s => {
-    if(s.estado !== "activo") return true; // incluir bajas del mes
-    return true;
-  }).filter(s => s.estado==="activo").sort((a,b)=>a.nombre.localeCompare(b.nombre,"es"));
+  const todos = APP.servicios.filter(s => s.estado==="activo")
+    .sort((a,b)=>a.nombre.localeCompare(b.nombre,"es"));
+
+  // Conteos y totales por período (sobre TODOS los activos, para el resumen)
+  const resumen = { "30":{n:0,total:0}, "15":{n:0,total:0} };
+  todos.forEach(s => {
+    const p = periodoDe(s.id);
+    const f = calcFacturacion(s.id, APP.mes.y, APP.mes.m);
+    resumen[p].n++; resumen[p].total += f.total;
+  });
+
+  // Servicios mostrados según el filtro
+  const svcs = (PREFAC_PERIODO === "todos") ? todos : todos.filter(s => periodoDe(s.id) === PREFAC_PERIODO);
 
   const navMes = `<div style="display:flex;align-items:center;gap:10px">
     <button class="btn btn-sm" onclick="cambiarMes(-1)">‹</button>
@@ -2091,15 +2122,29 @@ function renderPrefac(){
     <button class="btn btn-sm" onclick="cambiarMes(1)">›</button>
   </div>`;
 
-  const rows = svcs.map(s => ({ svc:s, f: calcFacturacion(s.id, APP.mes.y, APP.mes.m) }));
+  const rows = svcs.map(s => ({ svc:s, f: calcFacturacion(s.id, APP.mes.y, APP.mes.m), per: periodoDe(s.id) }));
   const totalGeneral = rows.reduce((a,r) => a + r.f.total, 0);
   const totalHs = rows.reduce((a,r) => a + r.f.totalHs, 0);
   const totalSimples = rows.reduce((a,r) => a + r.f.hsSimples, 0);
   const totalFeriado = rows.reduce((a,r) => a + r.f.hsFeriado, 0);
 
-  const filas = rows.map(({svc,f}) => `<tr>
+  // Segmentos del filtro (con conteo de cada período)
+  const seg = (val, txt) => `<button class="btn btn-sm ${PREFAC_PERIODO===val?"btn-primary":""}" onclick="setPrefacPeriodo('${val}')">${txt}</button>`;
+  const filtro = `<div style="display:flex;gap:6px;align-items:center">
+      ${seg("todos", `Todos (${todos.length})`)}
+      ${seg("30", `Día 30 (${resumen["30"].n})`)}
+      ${seg("15", `Día 15 (${resumen["15"].n})`)}
+    </div>`;
+
+  // Chips resumen por período (siempre visibles, para ver la división)
+  const chip = (p) => `<div style="text-align:right;padding:6px 12px;border:1px solid var(--border);border-radius:var(--radius);background:${PREFAC_PERIODO===p?"var(--primary-bg)":"var(--surface2)"}">
+      <div style="font-size:10px;color:var(--text3);text-transform:uppercase">${PERIODO_LABEL[p]} · ${resumen[p].n} serv.</div>
+      <div style="font-size:15px;font-weight:600;color:var(--primary)">${fmtMoneda(resumen[p].total)}</div></div>`;
+
+  const filas = rows.map(({svc,f,per}) => `<tr>
     <td style="padding:9px 12px"><strong>${svc.nombre}</strong><br>
       <span style="font-size:10px;color:var(--text3)">${f.esFijo?"Monto fijo":"Tipo "+f.tipoFactura}${svc.cuit?" · "+svc.cuit:""}</span></td>
+    <td style="padding:9px 12px;text-align:center"><span style="font-size:11px;padding:2px 8px;border-radius:20px;background:${per==="15"?"var(--purple-bg)":"var(--gray-bg)"};color:${per==="15"?"var(--purple-txt)":"var(--gray-txt)"}">${PERIODO_LABEL[per]}</span></td>
     <td style="padding:9px 12px;text-align:right;font-family:monospace;font-size:12px">${f.esFijo?"—":fmtHoras(f.hsSimples)}</td>
     <td style="padding:9px 12px;text-align:right;font-family:monospace;font-size:12px">${f.esFijo?"—":fmtHoras(f.hsFeriado)}</td>
     <td style="padding:9px 12px;text-align:right;font-family:monospace;font-size:12px">${f.esFijo?fmtMoneda(montoFijoDe(svc.id)):fmtMoneda(f.vh)}</td>
@@ -2109,26 +2154,29 @@ function renderPrefac(){
     <td style="padding:9px 12px;text-align:center"><button class="btn btn-sm" onclick="descargarPlanillaServicio('${svc.id}')" title="Descargar planilla">⬇️</button></td>
   </tr>`).join("");
 
-  return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">${navMes}
+  const etiquetaFiltro = PREFAC_PERIODO==="todos" ? "todos los períodos" : `período ${PERIODO_LABEL[PREFAC_PERIODO]}`;
+
+  return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:10px">${navMes}
+      <div style="display:flex;gap:10px;align-items:center">${chip("30")}${chip("15")}</div>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+      ${filtro}
       <div style="display:flex;gap:20px;align-items:center">
-        <div style="text-align:right"><div style="font-size:10px;color:var(--text3);text-transform:uppercase">Hs simples</div>
-          <div style="font-size:16px;font-weight:600">${fmtHoras(totalSimples)}</div></div>
-        <div style="text-align:right"><div style="font-size:10px;color:var(--text3);text-transform:uppercase">Hs feriado</div>
-          <div style="font-size:16px;font-weight:600">${fmtHoras(totalFeriado)}</div></div>
         <div style="text-align:right"><div style="font-size:10px;color:var(--text3);text-transform:uppercase">Hs totales</div>
           <div style="font-size:16px;font-weight:600">${fmtHoras(totalHs)}</div></div>
-        <div style="text-align:right;padding-left:16px;border-left:1px solid var(--border)"><div style="font-size:10px;color:var(--text3);text-transform:uppercase">Total del mes</div>
+        <div style="text-align:right;padding-left:16px;border-left:1px solid var(--border)"><div style="font-size:10px;color:var(--text3);text-transform:uppercase">Total (${etiquetaFiltro})</div>
           <div style="font-size:20px;font-weight:600;color:var(--primary)">${fmtMoneda(totalGeneral)}</div></div>
       </div>
     </div>
-    <div class="card"><div class="card-header"><h3>Prefacturación — ${MESES[APP.mes.m]} ${APP.mes.y}</h3>
+    <div class="card"><div class="card-header"><h3>Prefacturación — ${MESES[APP.mes.m]} ${APP.mes.y} · ${etiquetaFiltro}</h3>
       <div style="display:flex;align-items:center;gap:10px">
         <span style="font-size:11px;color:var(--text3)">${svcs.length} servicio(s) · ${fmtHoras(totalHs)} hs efectivas</span>
-        <button class="btn btn-sm btn-primary" onclick="descargarFacturacionMes()">⬇️ Descargar facturación del mes</button>
+        <button class="btn btn-sm btn-primary" onclick="descargarFacturacionMes()">⬇️ Descargar ${PREFAC_PERIODO==="todos"?"facturación del mes":"período "+PERIODO_LABEL[PREFAC_PERIODO]}</button>
       </div></div>
     <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
       <thead><tr style="background:var(--surface2)">
         <th style="text-align:left;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Servicio</th>
+        <th style="text-align:center;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Período</th>
         <th style="text-align:right;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Hs simples</th>
         <th style="text-align:right;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Hs feriado</th>
         <th style="text-align:right;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Valor hora</th>
@@ -2137,16 +2185,16 @@ function renderPrefac(){
         <th style="text-align:right;padding:8px 12px;font-size:10px;color:var(--text3);text-transform:uppercase">Total</th>
         <th style="padding:8px 12px"></th>
       </tr></thead>
-      <tbody>${filas || `<tr><td colspan="8" style="text-align:center;padding:32px;color:var(--text3)">No hay servicios.</td></tr>`}</tbody>
+      <tbody>${filas || `<tr><td colspan="9" style="text-align:center;padding:32px;color:var(--text3)">No hay servicios en este período.</td></tr>`}</tbody>
       <tfoot><tr style="background:var(--surface2);border-top:1px solid var(--border)">
         <td style="padding:10px 12px;font-weight:600">TOTAL</td>
-        <td colspan="5"></td>
+        <td colspan="6"></td>
         <td style="padding:10px 12px;text-align:right;font-family:monospace;font-weight:600;font-size:14px">${fmtMoneda(totalGeneral)}</td>
         <td></td>
       </tr></tfoot>
     </table></div></div>
     <div class="hint-box" style="background:var(--blue-bg);border:0.5px solid rgba(24,119,242,0.2);border-radius:var(--radius);padding:10px 12px;font-size:11px;color:var(--text2)">
-      ℹ️ <strong>Tipo A:</strong> subtotal + 21% IVA · <strong>Tipo B:</strong> IVA incluido en el valor hora · Feriados trabajados cuentan doble.
+      ℹ️ <strong>Período Día 30:</strong> cierre a fin de mes (la mayoría). <strong>Día 15:</strong> se factura el mes completo igual. · <strong>Tipo A:</strong> subtotal + 21% IVA · <strong>Tipo B:</strong> IVA incluido · Feriados trabajados cuentan doble.
     </div>`;
 }
 
