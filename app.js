@@ -3400,6 +3400,23 @@ function serviciosFueraDeLista(){
 }
 
 let PRECIO_EXPANDIDO = null; // id del precio con la lista de servicios desplegada
+let PRECIO_ORDEN = "nombre"; // nombre | neto-asc | neto-desc | uso-desc | uso-asc
+function setPrecioOrden(v){ PRECIO_ORDEN = v; render(); }
+
+// Ordena una lista de precios según PRECIO_ORDEN (no muta la original)
+function ordenarPrecios(lista){
+  const arr = lista.slice();
+  const uso = p => serviciosConValor(Number(p.neto)||0, p.id).length;
+  const porNombre = (a,b) => (a.nombre||"").localeCompare(b.nombre||"","es");
+  switch(PRECIO_ORDEN){
+    case "neto-asc":  arr.sort((a,b) => (Number(a.neto)||0) - (Number(b.neto)||0) || porNombre(a,b)); break;
+    case "neto-desc": arr.sort((a,b) => (Number(b.neto)||0) - (Number(a.neto)||0) || porNombre(a,b)); break;
+    case "uso-desc":  arr.sort((a,b) => uso(b) - uso(a) || porNombre(a,b)); break;
+    case "uso-asc":   arr.sort((a,b) => uso(a) - uso(b) || porNombre(a,b)); break;
+    default:          arr.sort(porNombre);
+  }
+  return arr;
+}
 
 function filaPrecio(p){
   const neto = Number(p.neto) || 0;
@@ -3449,9 +3466,8 @@ function tablaPrecios(lista, tituloCol){
 }
 
 function renderPrecios(){
-  const todos = APP.precios.slice().sort((a,b) => (a.nombre||"").localeCompare(b.nombre||"","es"));
-  const porHora = todos.filter(p => (p.tipo||"hora") !== "fijo");
-  const abonos = todos.filter(p => (p.tipo||"hora") === "fijo");
+  const porHora = ordenarPrecios(APP.precios.filter(p => (p.tipo||"hora") !== "fijo"));
+  const abonos  = ordenarPrecios(APP.precios.filter(p => (p.tipo||"hora") === "fijo"));
   const fuera = serviciosFueraDeLista();
 
   let bloqueFuera = "";
@@ -3473,14 +3489,27 @@ function renderPrecios(){
     </div>`;
   }
 
-  return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-      <div style="font-size:12px;color:var(--text2)">Los valores se cargan sin IVA. El final se calcula solo.</div>
-      <div style="display:flex;gap:8px">
+  const ordenOpt = (v,txt) => `<option value="${v}" ${PRECIO_ORDEN===v?"selected":""}>${txt}</option>`;
+  const selectorOrden = `<div style="display:flex;align-items:center;gap:6px">
+      <span style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px">Ordenar</span>
+      <select onchange="setPrecioOrden(this.value)" style="padding:7px 10px;border:1px solid var(--border2);border-radius:var(--radius);font-size:12px;background:var(--surface)">
+        ${ordenOpt("nombre","Nombre (A→Z)")}
+        ${ordenOpt("neto-desc","Valor: mayor a menor")}
+        ${ordenOpt("neto-asc","Valor: menor a mayor")}
+        ${ordenOpt("uso-desc","Más servicios vinculados")}
+        ${ordenOpt("uso-asc","Menos servicios vinculados")}
+      </select>
+    </div>`;
+
+  return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+      ${selectorOrden}
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn" onclick="verHistorialAumentos()">📈 Historial</button>
         <button class="btn" onclick="abrirAumentoGeneral()">📊 Aumento general</button>
         <button class="btn" onclick="vincularServiciosAuto()">🔗 Vincular servicios que coinciden</button>
       </div>
     </div>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:14px">Los valores se cargan sin IVA. El final se calcula solo.</div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
       <h3 style="font-size:14px;font-weight:500">Valores por hora</h3>
       <button class="btn btn-sm btn-primary" onclick="nuevoPrecio('hora')">+ Nuevo valor por hora</button>
